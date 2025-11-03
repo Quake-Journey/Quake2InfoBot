@@ -1,0 +1,21 @@
+{
+  "name": "quake2infobot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cli-table3": "^0.6.5",
+    "dgram": "^1.0.1",
+    "dram": "^0.3.1",
+    "mongodb": "^6.9.0",
+    "net": "^1.0.2",
+    "node-fetch": "^3.3.2",
+    "telegraf": "^4.16.3"
+  }
+}
