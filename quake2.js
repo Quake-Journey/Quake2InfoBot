@@ -103,6 +103,7 @@ async function queryServer(serverIp, serverPort) {
 
     socket.on('message', (message) => {
       clearTimeout(timeout);
+      //console.log('message',message);			
       const response = parseQuake2Response(message, serverIp, serverPort);
       resolve(response);
       socket.close();
@@ -127,6 +128,8 @@ function parseQuake2Response(data, serverIp, serverPort) {
     const line = lines[1] ? lines[1].trim() : '';
     const keyValuePairs = line.substring(6).split('\\');
     //console.log('keyValuePairs.length='+keyValuePairs.length.toString());
+    
+    // 29.11.2025 console.log('keyValuePairs',keyValuePairs);
 
     serverInfo['serverIp'] = serverIp;
     serverInfo['serverPort'] = serverPort;
@@ -175,6 +178,7 @@ function parseQuake2Response(data, serverIp, serverPort) {
         //  parts = result;  //  Замените parts на result
         let name = parts[2] ? parts[2].startsWith('"') && parts[2].endsWith('"') ? parts[2].slice(1, -1) : parts[2] : null;
         name = name.replace(/"/g, ''); // Удаляет все символы "
+	      // 29.11.2025 console.log('parts',parts);
         const player = {
           score: parseInt(parts[0]),
           ping: parseInt(parts[1]),
@@ -219,7 +223,7 @@ function parseQuake2Response4(data, serverIp, serverPort) {
 
     //console.log("line="+lines[i]);
     const line = lines[i].trim();
-    console.log('line:', line);
+    //console.log('line:', line);
     if (line) {
       //  Разбиваем строку по пробелам, игнорируя пробелы в кавычках
       let parts = line.split(' ');
@@ -264,7 +268,7 @@ function parseQuake2Response4(data, serverIp, serverPort) {
 
 
 function parseQuake2Response3(data, serverIp, serverPort) {
-  console.log(data.toString());
+  //console.log(data.toString());
   const lines = data.toString().split('\n');
   const serverInfo = {};
   const players = [];
@@ -286,7 +290,7 @@ function parseQuake2Response3(data, serverIp, serverPort) {
   }
 
   for (let i = lines.length - 1; i > 1; i--) {
-    console.log("line=" + lines[i]);
+    //console.log("line=" + lines[i]);
     const line = lines[i].trim();
     if (line) {
       //  Разбиваем строку по пробелам, игнорируя пробелы в кавычках
@@ -320,7 +324,7 @@ function parseQuake2Response3(data, serverIp, serverPort) {
 }
 
 function parseQuake2ResponseOld(data, serverIp, serverPort) {
-  console.log(data.toString());
+  //console.log(data.toString());
   const lines = data.toString().split('\n');
   const serverInfo = {};
   const players = [];
@@ -342,7 +346,7 @@ function parseQuake2ResponseOld(data, serverIp, serverPort) {
   }
 
   for (let i = lines.length - 1; i > 1; i--) {
-    console.log("line=" + lines[i]);
+    //console.log("line=" + lines[i]);
     const line = lines[i].trim();
     if (line) {
       const parts = line.split(' ');

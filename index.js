@@ -15,6 +15,15 @@ const heuristicHistoryMaps = {}; // Массив для эвристики
 const heuristicHistoryPlayers = {}; // Массив для эвристики
 const heuristicHistoryPlayersScores = {}; // Массив для эвристики
 
+// 🔁 Глобальный кэш данных по серверам (в памяти бота)
+const globalServerCache = {
+  q2: {},   // key: "ip:port" → { serverInfo, serverPlayers, lastUpdated, game, ip, port }
+  qw: {}
+};
+
+// Таймер глобального опроса серверов
+let globalServerTimer = null;
+let isGlobalServerCacheRefreshing = false; // 👈 защита от наложений
 
 let botName;
 let botId;
@@ -184,7 +193,10 @@ bot.start(async (ctx) => {
 
 // Инициализируем автообновления при запуске бота
 //initializeAutoServersUpdate();
-initializeAutoSearch();
+console.log('Запуск глобального автоматического опроса серверов...');
+startGlobalServerPolling();    // 🔁 новый глобальный опрос серверов и заполнение кэша в памяти
+console.log('Запуск автоматического обновения поиска по данным пользователей...');
+initializeAutoSearch(); // Инициализация автообновлений
 
 /* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
@@ -2967,6 +2979,11 @@ async function refreshPlayers(userId, searchFor, game, msgIdToDel, skipStatusMsg
     serverList = await getServerListFromCache(game);
     //console.log('const serverList = await getServerListQ2(); - FINISH');
 
+    // Берём снимок кэша серверов для текущей игры на момент старта поиска
+    const cacheSnapshot = (typeof globalServerCache !== 'undefined' && globalServerCache[game])
+      ? globalServerCache[game]
+      : null;
+
     //const addedPlayers = [];
     let serverInfoString = "";
     let playersInfoString = "";
@@ -2994,7 +3011,20 @@ async function refreshPlayers(userId, searchFor, game, msgIdToDel, skipStatusMsg
         }
         */
         //({ serverPlayers, serverInfo } = await queryServer(game, ip, port));
-        ({ serverPlayers, serverInfo } = await queryServerDirect(game, ip, port));
+
+        // - 29.11.2025 ({ serverPlayers, serverInfo } = await queryServerDirect(game, ip, port));
+
+        // Сначала пробуем взять данные из глобального кэша,
+        // если нет записи — делаем живой запрос, как раньше.
+        const cacheKey = `${ip}:${port}`;
+        const cacheEntry = cacheSnapshot ? cacheSnapshot[cacheKey] : null;
+
+        if (cacheEntry) {
+          serverPlayers = Array.isArray(cacheEntry.serverPlayers) ? cacheEntry.serverPlayers : [];
+          serverInfo = cacheEntry.serverInfo || {};
+        } else {
+          ({ serverPlayers, serverInfo } = await queryServerDirect(game, ip, port));
+        }
 
         serverPlayersTmp = serverPlayers.map(item => ({ ...item }));
         serverPlayers.forEach(p => {
@@ -3358,6 +3388,26 @@ function checkMap(mapsArray, mapToCheck) {
 
 /* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
+function formatTimeDiff(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+function isActiveScore(score) {
+  if (typeof score === 'string') {
+    const s = score.trim().toLowerCase();
+    if (s === 'spectator' || s === 'spec') return false;
+  }
+  const n = parseInt(score);
+  if (isNaN(n)) return false;
+  // активным считаем только не-нулевой числовой счёт
+  return n !== 0;
+}
+
+/* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
 async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServersSearch, game, shortReport, msgIdToDel, skipStatusMsg, forceUpdate, anyToFind) {
   let wasFinded = false;
   try {
@@ -3448,6 +3498,18 @@ async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServ
       servers = await getServerListFromCache(game);
     }
 
+    // Берём снимок кэша серверов для текущей игры на момент старта поиска
+    const cacheSnapshot = (typeof globalServerCache !== 'undefined' && globalServerCache[game])
+      ? globalServerCache[game]
+      : null;
+
+    console.log(
+      'refreshServers: game=', game,
+      ', servers.length=', servers.length,
+      ', cacheSnapshot size=',
+      cacheSnapshot ? Object.keys(cacheSnapshot).length : 0
+    );
+
     //console.log('servers list:', servers);
 
 
@@ -3509,7 +3571,28 @@ async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServ
           ({ serverPlayers, serverInfo } = await queryServerDirect(game, ip, port));
         }
         */
-        ({ serverPlayers, serverInfo } = await queryServerDirect(game, ip, port));
+        // 29.11.2025 ({ serverPlayers, serverInfo } = await queryServerDirect(game, ip, port));
+
+        // 👇 сначала пытаемся взять данные из глобального кэша (снимок на момент старта функции),
+        // если записи нет — делаем живой запрос, как раньше.
+        const cacheKey = `${ip}:${port}`;
+        const cacheEntry = cacheSnapshot ? cacheSnapshot[cacheKey] : null;
+
+        if (!cacheEntry) {
+          log('refreshServers: cache MISS for', cacheKey);
+        } else {
+          log('refreshServers: cache HIT for', cacheKey);
+        }
+
+        if (cacheEntry) {
+          serverPlayers = Array.isArray(cacheEntry.serverPlayers) ? cacheEntry.serverPlayers : [];
+          serverInfo = cacheEntry.serverInfo || {};
+          log('данные по серверам получены из кэша');
+        } else {
+          ({ serverPlayers, serverInfo } = await queryServerDirect(game, ip, port));
+          log('данные по серверам получены напрямую');
+        }
+
         /*
         if (game == 'q2') {
           ({ players: serverPlayers, serverInfo } = await queryServerQ2(ip, port));
@@ -3518,7 +3601,36 @@ async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServ
         }
         */
         //console.log(serverPlayers);
-        serverPlayersTmp = serverPlayers.map(item => ({ ...item }));
+        // 29.11.2025 serverPlayersTmp = serverPlayers.map(item => ({ ...item }));
+
+        // Подтягиваем предыдущие данные по игрокам (в т.ч. timeOnMap), если они были
+        const previousPlayersScoresRaw =
+          heuristicHistoryPlayersScores[userId + server] && heuristicHistoryPlayersScores[userId + server] != undefined
+            ? heuristicHistoryPlayersScores[userId + server]
+            : [];
+
+        const previousPlayersSnapshot = Array.isArray(previousPlayersScoresRaw)
+          ? previousPlayersScoresRaw.map(item => ({ ...item }))
+          : [];
+
+        // Словарь: имя -> прошлый timeOnMap
+        const previousTimeOnMapByName = new Map();
+        for (const p of previousPlayersSnapshot) {
+          if (p && typeof p.name === 'string' && p.timeOnMap !== undefined) {
+            previousTimeOnMapByName.set(p.name, p.timeOnMap);
+          }
+        }
+
+        // Копируем игроков с сервера и подтягиваем им прошлый timeOnMap (если был)
+        serverPlayersTmp = serverPlayers.map(item => {
+          const copy = { ...item };
+          const prevTime = previousTimeOnMapByName.get(copy.name);
+          if (prevTime !== undefined) {
+            copy.timeOnMap = prevTime;
+          }
+          return copy;
+        });
+
 
         if (advmode > 1 && serverInfoString === '') {  // если расширенный режим = 2 или 3 то включаем доп инфу о сервере
           for (const key in serverInfo) {
@@ -3633,7 +3745,19 @@ async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServ
             //serverPlayersTmp.sort((a, b) => b.score - a.score); //сортируем по счёту
             //console.log(serverPlayersTmp);
 
-            if (newMatch) playersInfoString = `\n\n ---------- Новый матч ----------` + playersInfoString;
+            if (newMatch) {
+              playersInfoString = `\n\n ---------- Новый матч ----------` + playersInfoString;
+              const matchStartTs = Date.now();
+              serverPlayersTmp.forEach(player => {
+                // Если игрок уже реально играет (счёт не 0 и не Spectator) — стартуем таймер
+                if (isActiveScore(player.score)) {
+                  player.timeOnMap = matchStartTs;
+                } else {
+                  // спектатор / «спящий» игрок — время не считаем
+                  delete player.timeOnMap;
+                }
+              });
+            }
 
             serverPlayersTmp.forEach(player => {
               if (advmode === 1 || advmode === 3) {  // если расширенный режим = 1 или 3 то включаем доп инфу об игроках
@@ -3645,18 +3769,39 @@ async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServ
                     const pps = previousPlayersScores[i];
                     //log('pps=', pps);
                     if (pps.name == player.name) {
-                      scoreDiff = player.score - pps.score;
-                      if (scoreDiff < 0 && ((player.score != 0) || (player.score == 0 && scoreDiff >= -3))) { //ловим случаи выхода в спеки - редко когда -3 становится
-                        scoreDiffVisual = ' 🔻' + scoreDiff.toString();
+                      const prevScoreNum = parseInt(pps.score);
+                      const curScoreNum = parseInt(player.score);
+
+                      const safePrev = isNaN(prevScoreNum) ? 0 : prevScoreNum;
+                      const safeCur = isNaN(curScoreNum) ? 0 : curScoreNum;
+
+                      scoreDiff = safeCur - safePrev;
+
+                      // ⚡ Игрок был без времени и начал активно играть:
+                      //   - раньше считался "неактивным" (0 / Spectator),
+                      //   - сейчас активный (score != 0 и не Spectator),
+                      //   - и есть реальное изменение счёта
+                      if (player.timeOnMap === undefined && isActiveScore(player.score) && scoreDiff !== 0) {
+                        // считаем, что вошёл в игру примерно 10 секунд назад
+                        player.timeOnMap = Date.now() - 10000;
                       }
-                      else if (scoreDiff > 0) {
+
+                      if (scoreDiff < 0 && ((safeCur != 0) || (safeCur == 0 && scoreDiff >= -3))) { // ловим выход в спеки
+                        scoreDiffVisual = ' 🔻' + scoreDiff.toString();
+                      } else if (scoreDiff > 0) {
                         scoreDiffVisual = ' ⬆ +' + scoreDiff.toString();
                       }
-                      //if (pps.score > player.score) scoreDiff = player.score - pps.score;
-                      //else if (pps.score < player.score) scoreDiff = player.score - pps.score;
-                      //i = previousPlayersScores.length;
+
+                      if (player.timeOnMap !== undefined) {
+                        const elapsed = Date.now() - player.timeOnMap;
+                        const timeFormatted = formatTimeDiff(elapsed);
+                        scoreDiffVisual = ` ⏱️ ${timeFormatted}` + scoreDiffVisual;
+                      }
+
                       break;
                     }
+
+
                   }
                 }
                 if (altview == 0) {
@@ -3889,19 +4034,19 @@ async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServ
 ${anyToFind != '' ? 'Информация о сервере: ' + escapeHtmlForTelegram(foundServer.serverInfo) : ''}
 
 `;
-      } 
+      }
 
       //log('!!!!! END CURRENT SERVER:', curIdx);
 
     };
 
     if (shortReport) {
-       /* пока убираю - надо подумать как лучше хранить для shortReport, поскольку foundServer тут не годится - цикл выше заканчивается по foundServer
-      if (autodelhistory == 1) {
-        previousMessageIdIndex = !themeId ? 'ShortReport' + game + String(userId) + foundServer.server + mapsToSearch.join('') + serverToSearch : 'ShortReport' + game + String(userId) + String(themeId) + foundServer.server + mapsToSearch.join('') + serverToSearch;
-        previousMessageId = messageIds[previousMessageIdIndex];
-      }
-        */
+      /* пока убираю - надо подумать как лучше хранить для shortReport, поскольку foundServer тут не годится - цикл выше заканчивается по foundServer
+     if (autodelhistory == 1) {
+       previousMessageIdIndex = !themeId ? 'ShortReport' + game + String(userId) + foundServer.server + mapsToSearch.join('') + serverToSearch : 'ShortReport' + game + String(userId) + String(themeId) + foundServer.server + mapsToSearch.join('') + serverToSearch;
+       previousMessageId = messageIds[previousMessageIdIndex];
+     }
+       */
       messageCount = 0;
       //console.log(message);
       const chunks = message.match(/(.|[\n\r]){1,4096}/g);
@@ -4585,17 +4730,17 @@ async function findInfo(ctx, game, msg) { //Функция для вызова �
       //fi = [];
       //fi[0] = '*';
       let txt = '';
-      if (game=='q2') txt = '/fq2 playground';
-      else if (game=='qw') txt = '/fqw bot';
-      await ctx.reply('Укажите, что вы хотите найти через пробел после ввода команды, например: '+txt);
+      if (game == 'q2') txt = '/fq2 playground';
+      else if (game == 'qw') txt = '/fqw bot';
+      await ctx.reply('Укажите, что вы хотите найти через пробел после ввода команды, например: ' + txt);
       return;
     }
-  
+
     if (String(fi[0]).trim().length < config.FIND_TEXT_LIMIT) {
       await ctx.reply('минимальное количество символов для поиска информации: ' + config.FIND_TEXT_LIMIT);
       return;
     }
-    
+
     let msgId = 0;
     await ctx.reply(msg).then((message) => {
       msgId = message.message_id;
@@ -5052,12 +5197,208 @@ async function queryServerDirect(game, ip, port) {
     return { serverPlayers, serverInfo };
 
   } catch (error) {
+    //log('getServerList:', error);
+    return { serverPlayers: [], serverInfo: {} }; // Возвращаем пустые объекты, если серверов нет
+  }
+}
+
+/* -------------------------------------------------------------...--------------------------------------------------------------*/
+
+async function queryServerDirect(game, ip, port) {
+  let serverPlayers = [];
+  let serverInfo = {};
+  try {
+    if (game == 'q2') {
+      ({ players: serverPlayers, serverInfo } = await queryServerQ2(ip, port));
+    } else if (game == 'qw') {
+      ({ players: serverPlayers, serverInfo } = await queryServerQW(ip, port));
+    }
+    return { serverPlayers, serverInfo };
+
+  } catch (error) {
     log('getServerList:', error);
     return { serverPlayers: [], serverInfo: {} }; // Возвращаем пустые объекты, если серверов нет
   }
 }
 
+/* -------------------------------------------------------------...--------------------------------------------------------------*/
+// 🔁 ГЛОБАЛЬНЫЙ ОПРОС СЕРВЕРОВ И ЗАПОЛНЕНИЕ КЭША В ПАМЯТИ БОТА
+
+async function refreshGlobalServersCache() {
+  if (isGlobalServerCacheRefreshing) {
+    console.log('refreshGlobalServersCache: предыдущее обновление ещё не закончено, пропускаем тик');
+    return;
+  }
+
+  isGlobalServerCacheRefreshing = true;
+
+  try {
+    console.log('refreshGlobalServersCache: старт обновления данных серверов');
+    const games = config.GAMES ? config.GAMES.split(',') : ['q2', 'qw'];
+    const now = new Date();
+
+    // временный кэш, чтобы потом атомарно поменять ссылку
+    const newCache = {
+      q2: {},
+      qw: {}
+    };
+
+    // получаем всех пользователей один раз
+    let allUsers = [];
+    try {
+      allUsers = await getAllUsers();
+    } catch (e) {
+      console.log('refreshGlobalServersCache: не удалось получить список пользователей:', e);
+    }
+
+    for (let i = 0; i < games.length; i++) {
+      const game = games[i].trim();
+      if (!game) continue;
+
+      // множество уникальных серверов для этой игры
+      const uniqueServers = new Set();
+
+      // 1) сервера из мастер-списка
+      let serverList = [];
+      if (game === 'q2') {
+        serverList = await getServerListQ2();
+      } else if (game === 'qw') {
+        serverList = await getServerListQW();
+      } else {
+        continue;
+      }
+
+      if (Array.isArray(serverList)) {
+        serverList.forEach((s) => {
+          if (s && typeof s === 'string') {
+            uniqueServers.add(s.trim());
+          }
+        });
+      }
+
+      // 2) сервера из настроек всех пользователей
+      if (Array.isArray(allUsers) && allUsers.length > 0) {
+        for (const user of allUsers) {
+          try {
+            // если getAllUsers уже возвращает полные настройки, можно будет упростить;
+            // но надёжнее сейчас ещё раз получить настройки по userId
+            const userId = user.userId !== undefined ? user.userId : null;
+            if (userId === null || userId === undefined) continue;
+
+            const userSettings = await getUserSettings(userId);
+            if (!userSettings) continue;
+
+            let userServers = [];
+            if (game === 'q2') {
+              userServers = userSettings.q2servers || [];
+            } else if (game === 'qw') {
+              userServers = userSettings.qwservers || [];
+            }
+
+            if (Array.isArray(userServers)) {
+              userServers.forEach((s) => {
+                if (s && typeof s === 'string') {
+                  uniqueServers.add(s.trim());
+                }
+              });
+            }
+          } catch (e) {
+            console.log('refreshGlobalServersCache: ошибка при разборе серверов пользователя', user, e);
+          }
+        }
+      }
+
+      const allServers = Array.from(uniqueServers);
+
+      if (!Array.isArray(allServers) || allServers.length === 0) {
+        console.log(`refreshGlobalServersCache: для игры ${game} список серверов пуст (master+users)`);
+        continue;
+      }
+
+      console.log(
+        `refreshGlobalServersCache: игра=${game}, серверов из master=${Array.isArray(serverList) ? serverList.length : 0}, ` +
+        `всего уникальных (master+users)=${allServers.length}`
+      );
+
+      const promises = allServers.map(async (server) => {
+        const [ip, port] = server.split(':');
+        const key = `${ip}:${port}`;
+        try {
+          const { serverPlayers, serverInfo } = await queryServerDirect(game, ip, port);
+
+          newCache[game][key] = {
+            game,
+            ip,
+            port,
+            server: key,
+            serverInfo,
+            serverPlayers,
+            lastUpdated: now
+          };
+        } catch (err) {
+          console.log(`refreshGlobalServersCache: ошибка сервера ${server} (${game})`, err);
+          // при ошибке просто не добавляем этот сервер в новый снэпшот
+        }
+      });
+
+      await Promise.allSettled(promises);
+    }
+
+    // 👇 атомарная замена ссылок на новый снэпшот
+    globalServerCache.q2 = newCache.q2;
+    globalServerCache.qw = newCache.qw;
+
+    //console.log('refreshGlobalServersCache: глобальный кэш по серверам обновлён');
+  } catch (error) {
+    console.log('Ошибка при обновлении глобального кэша серверов:', error);
+    // в случае ошибки старый globalServerCache остаётся доступным
+  } finally {
+    isGlobalServerCacheRefreshing = false;
+  }
+}
+
+
+/* -------------------------------------------------------------...--------------------------------------------------------------*/
+
+// Запуск периодического глобального опроса серверов
+function startGlobalServerPolling() {
+  try {
+    const intervalSec = config.GLOBAL_REFRESH_INTERVAL || 10;
+    if (intervalSec <= 0) {
+      console.log('GLOBAL_REFRESH_INTERVAL <= 0, глобальный опрос серверов отключён');
+      return;
+    }
+
+    const intervalMs = intervalSec * 1000;
+
+    if (globalServerTimer) {
+      clearTimeout(globalServerTimer);
+      globalServerTimer = null;
+    }
+
+    console.log(`Глобальный опрос серверов запущен, интервал = ${intervalSec} сек`);
+
+    const tick = async () => {
+      await refreshGlobalServersCache();
+      globalServerTimer = setTimeout(tick, intervalMs);
+    };
+
+    // первый запуск сразу
+    tick();
+  } catch (error) {
+    console.log('Ошибка при запуске глобального опроса серверов:', error);
+  }
+}
+
+function getServerFromGlobalCache(game, ip, port) {
+  const gameCache = globalServerCache[game];
+  if (!gameCache) return null;
+  const key = `${ip}:${port}`;
+  return gameCache[key] || null;
+}
+
 /* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
 
 // Функция для автоматического поиска игроков
 async function startAutoSearch(userId, interval) {
@@ -5212,6 +5553,9 @@ bot.launch()
     try {
       console.log('Бот запущен');
       //initializeAutoServersUpdate(); //Инициализируем обновление серверов
+      console.log('Запуск глобального автоматического опроса серверов...');
+      startGlobalServerPolling();    // 🔁 новый глобальный опрос серверов и заполнение кэша в памяти
+      console.log('Запуск автоматического обновения поиска по данным пользователей...');
       initializeAutoSearch(); // Инициализация автообновлений
     }
     catch (error) { console.log('error:', error); }
