@@ -10,7 +10,7 @@ module.exports = {
   MAX_MESSAGES_PER_SECOND: 10,
   MAX_MESSAGES_PER_SEARCH: 51,
   SLEEP_TIME: 10000, // 10 секунд между уведомлениями в случае превышения разрешенного кол-ва
-  VERSION: '1.0.0',
+  VERSION: '1.0.1',
   GAMES_SUPPORT:  'Quake II , QuakeWorld',
   GAMES: 'q2,qw',
   DEFAULT_GAME: 'q2',

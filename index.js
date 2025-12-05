@@ -91,7 +91,7 @@ function getUserID(ctx) {
 bot.start(async (ctx) => {
   try {
     const welcomeMessage = `
-🎮 *Добро пожаловать в Quake2InfoBot!*
+🎮 *Добро пожаловать в Quake Info Bot!*
 
 🤖 *@${botName}* - продвинутый бот для мониторинга игроков, серверов и карт на серверах.
 В   Поддерживаемые игры: ${config.GAMES_SUPPORT}, в будущем планируется интеграция с прочими играми в серии Quake.
@@ -273,6 +273,53 @@ async function helpAdmin(ctx) {
 
   } catch (error) { console.log(`Ошибка: `, error) };
 }
+
+// Глобальный middleware для "тихих" чатов
+bot.use(async (ctx, next) => {
+  try {
+    // Определяем chatId для разных типов апдейтов
+    const chat =
+      ctx.chat ||
+      (ctx.message && ctx.message.chat) ||
+      (ctx.callbackQuery && ctx.callbackQuery.message && ctx.callbackQuery.message.chat);
+
+    const chatId = chat ? chat.id : null;
+    if (!chatId) {
+      return next();
+    }
+
+    // Текст сообщения (если есть)
+    const text = ctx.message && ctx.message.text ? ctx.message.text.trim() : '';
+
+    // Разрешаем всегда обрабатывать /silent (даже если чат в silent)
+    if (text) {
+      const cmd = text.split(/\s+/)[0];
+      if (cmd === '/silent' || cmd.startsWith('/silent@')) {
+        return next();
+      }
+    }
+
+    // Читаем настройки бота (userId = 0)
+    const botSettings = await getUserSettings(0);
+    const silentChats = botSettings && Array.isArray(botSettings.silentChats)
+      ? botSettings.silentChats
+      : [];
+
+    const isSilent = silentChats.includes(chatId);
+
+    if (isSilent) {
+      // В этом чате бот молчит для любых команд, кроме /silent
+      return;
+    }
+
+    return next();
+  } catch (err) {
+    console.log('Silent middleware error:', err);
+    // При ошибке не блокируем обработку
+    return next();
+  }
+});
+
 
 /* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
@@ -2788,6 +2835,75 @@ bot.command('setbotfilter', async (ctx) => {
 
 /* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
+// Команда /silent — включает/выключает тихий режим для текущего чата
+// Доступна только администраторам бота
+bot.command('silent', async (ctx) => {
+  try {
+    const fromId = ctx.from && ctx.from.id;
+    if (!isAdmin(fromId)) {
+      return; // не админ бота — ничего не делаем
+    }
+
+    const chat = ctx.chat || (ctx.message && ctx.message.chat);
+    if (!chat || !chat.id) {
+      return;
+    }
+
+    const chatId = chat.id;
+    const text = ctx.message && ctx.message.text ? ctx.message.text.trim() : '';
+    const parts = text.split(/\s+/);
+    const arg = parts.length > 1 ? parts[1] : null;
+
+    const botSettings = (await getUserSettings(0)) || {};
+    let silentChats = Array.isArray(botSettings.silentChats)
+      ? botSettings.silentChats
+      : [];
+
+    // Без аргумента — показать текущее значение
+    if (!arg) {
+      const isSilent = silentChats.includes(chatId);
+      return ctx.reply(
+        `Текущее значение для этого чата: silent = ${isSilent ? 1 : 0}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+
+    if (arg === '1') {
+      if (!silentChats.includes(chatId)) {
+        silentChats.push(chatId);
+        await updateUserSettings(0, { silentChats });
+      }
+      return ctx.reply(
+        'Тихий режим для этого чата включён (silent = 1).\n' +
+        'Бот будет игнорировать команды в этом чате, кроме /silent.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else if (arg === '0') {
+      if (silentChats.includes(chatId)) {
+        silentChats = silentChats.filter(id => id !== chatId);
+        await updateUserSettings(0, { silentChats });
+      }
+      return ctx.reply(
+        'Тихий режим для этого чата выключен (silent = 0).',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      return ctx.reply(
+        'Использование:\n' +
+        '/silent — показать текущее значение для этого чата\n' +
+        '/silent 1 — включить тихий режим\n' +
+        '/silent 0 — выключить тихий режим',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  } catch (err) {
+    console.log('Ошибка команды /silent:', err);
+  }
+});
+
+
+/* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
 // Команда /unban <userID>
 bot.command('unban', async (ctx) => {
   try {
@@ -3503,12 +3619,13 @@ async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServ
       ? globalServerCache[game]
       : null;
 
-    console.log(
+    /*console.log(
       'refreshServers: game=', game,
       ', servers.length=', servers.length,
       ', cacheSnapshot size=',
       cacheSnapshot ? Object.keys(cacheSnapshot).length : 0
     );
+*/
 
     //console.log('servers list:', servers);
 
@@ -4966,7 +5083,7 @@ bot.command('sqw', async (ctx) => {
 
 /* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
-async function GetServersStats(game) {
+async function GetServersStatsOld(game) {
   try {
     const botSettings = await getUserSettings(0);
     const botFilterPlayers = botSettings && botSettings.botFilter != undefined ? botSettings.botFilter : [];
@@ -5024,6 +5141,116 @@ async function GetServersStats(game) {
     console.log('GetServersStats error: ', error);
   }
 }
+
+async function GetServersStats(game) {
+  try {
+    const botSettings = await getUserSettings(0);
+    const botFilterPlayers = botSettings && botSettings.botFilter != undefined ? botSettings.botFilter : [];
+
+    // Берём данные из глобального кэша в памяти
+    const cacheByGame =
+      typeof globalServerCache !== 'undefined' &&
+        globalServerCache &&
+        globalServerCache[game]
+        ? globalServerCache[game]
+        : null;
+
+    if (!cacheByGame || Object.keys(cacheByGame).length === 0) {
+      // Нет данных в кэше по этой игре
+      return {
+        serverCount: 0,
+        playersCount: 0,
+        mapsCount: 0,
+        uniqueMaps: '',
+        uniqueMatchTypes: '',
+        uniquePlayers: '',
+        top5Players: ''
+      };
+    }
+
+    // В кэше лежит объект вида { "ip:port": { game, ip, port, server, serverInfo, serverPlayers, lastUpdated }, ... }
+    const servers = Object.values(cacheByGame);
+
+    const uniqueMaps = new Set();        // список карт
+    const uniqueMatchTypes = new Set();  // список типов матчей / режимов
+    const uniquePlayers = new Set();     // список игроков
+    const allPlayers = [];               // все игроки для топа по score
+
+    servers.forEach(entry => {
+      const info = entry && entry.serverInfo ? entry.serverInfo : {};
+      const serverPlayers = Array.isArray(entry && entry.serverPlayers) ? entry.serverPlayers : [];
+
+      // Карты
+      if (info.mapname) {
+        uniqueMaps.add(info.mapname);
+      }
+
+      // Тип матча / режим — в разных модах может называться по-разному
+      if (info.match_type) {
+        uniqueMatchTypes.add(info.match_type);
+      } else if (info.mode) {
+        uniqueMatchTypes.add(info.mode);
+      } else if (info.gamename) {
+        // запасной вариант, чтобы хоть что-то было в статистике
+        uniqueMatchTypes.add(info.gamename);
+      }
+
+      // Игроки
+      serverPlayers.forEach(player => {
+        const foundPlayer = includesPlayer(botFilterPlayers, normalNameHard(player.name));
+        if (foundPlayer == '') {
+          uniquePlayers.add(player.name);
+          allPlayers.push(player);
+        }
+      });
+    });
+
+    // Сортировки
+    const sortedMaps = Array.from(uniqueMaps).sort();
+    const sortedMatchTypes = Array.from(uniqueMatchTypes).sort();
+    const sortedPlayers = Array.from(uniquePlayers).sort();
+
+    // Топ-5 игроков по очкам (score может быть строкой)
+    const sortedPlayersByScore = allPlayers
+      .slice()
+      .sort((a, b) => {
+        const as = parseInt(a.score, 10);
+        const bs = parseInt(b.score, 10);
+        const aIsNum = !isNaN(as);
+        const bIsNum = !isNaN(bs);
+
+        if (aIsNum && bIsNum) return bs - as;   // по убыванию
+        if (aIsNum && !bIsNum) return -1;       // число выше "Spectator"/NaN
+        if (!aIsNum && bIsNum) return 1;
+        return 0;                               // оба NaN — равны
+      })
+      .slice(0, 5);
+
+    return {
+      serverCount: servers.length,
+      playersCount: uniquePlayers.size,
+      mapsCount: uniqueMaps.size,
+      uniqueMaps: sortedMaps.join(', '),
+      uniqueMatchTypes: sortedMatchTypes.join(', '),
+      uniquePlayers: sortedPlayers.join(', '),
+      top5Players: sortedPlayersByScore
+        .map((player, index) => `${index + 1}. ${player.name} (${player.score})`)
+        .join(', ')
+    };
+  } catch (error) {
+    console.log('GetServersStats error: ', error);
+    return {
+      serverCount: 0,
+      playersCount: 0,
+      mapsCount: 0,
+      uniqueMaps: '',
+      uniqueMatchTypes: '',
+      uniquePlayers: '',
+      top5Players: ''
+    };
+  }
+}
+
 
 /* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 function canDetailsLog() {
@@ -5226,132 +5453,139 @@ async function queryServerDirect(game, ip, port) {
 
 async function refreshGlobalServersCache() {
   if (isGlobalServerCacheRefreshing) {
-    console.log('refreshGlobalServersCache: предыдущее обновление ещё не закончено, пропускаем тик');
+    log('refreshGlobalServersCache: предыдущее обновление ещё не закончено, пропускаем тик');
     return;
   }
 
   isGlobalServerCacheRefreshing = true;
 
   try {
-    console.log('refreshGlobalServersCache: старт обновления данных серверов');
+    log('refreshGlobalServersCache: старт обновления данных серверов');
     const games = config.GAMES ? config.GAMES.split(',') : ['q2', 'qw'];
     const now = new Date();
-
-    // временный кэш, чтобы потом атомарно поменять ссылку
-    const newCache = {
-      q2: {},
-      qw: {}
-    };
 
     // получаем всех пользователей один раз
     let allUsers = [];
     try {
       allUsers = await getAllUsers();
     } catch (e) {
-      console.log('refreshGlobalServersCache: не удалось получить список пользователей:', e);
+      log('refreshGlobalServersCache: не удалось получить список пользователей:', e);
     }
 
-    for (let i = 0; i < games.length; i++) {
-      const game = games[i].trim();
-      if (!game) continue;
+    // Для каждой игры запускаем отдельный "поток" обновления,
+    // чтобы q2 и qw опрашивались параллельно,
+    // и кэш по игре обновлялся сразу после завершения её опроса.
+    const gamePromises = games.map(async (rawGame) => {
+      const game = rawGame.trim();
+      if (!game) return;
 
-      // множество уникальных серверов для этой игры
-      const uniqueServers = new Set();
+      try {
+        // множество уникальных серверов для этой игры
+        const uniqueServers = new Set();
 
-      // 1) сервера из мастер-списка
-      let serverList = [];
-      if (game === 'q2') {
-        serverList = await getServerListQ2();
-      } else if (game === 'qw') {
-        serverList = await getServerListQW();
-      } else {
-        continue;
-      }
+        // 1) сервера из мастер-списка
+        let serverList = [];
+        if (game === 'q2') {
+          serverList = await getServerListQ2();
+        } else if (game === 'qw') {
+          serverList = await getServerListQW();
+        } else {
+          // неизвестная игра — пропускаем
+          return;
+        }
 
-      if (Array.isArray(serverList)) {
-        serverList.forEach((s) => {
-          if (s && typeof s === 'string') {
-            uniqueServers.add(s.trim());
+        if (Array.isArray(serverList)) {
+          serverList.forEach((s) => {
+            if (s && typeof s === 'string') {
+              uniqueServers.add(s.trim());
+            }
+          });
+        }
+
+        // 2) сервера из настроек всех пользователей
+        if (Array.isArray(allUsers) && allUsers.length > 0) {
+          for (const user of allUsers) {
+            try {
+              const userId = user.userId !== undefined ? user.userId : null;
+              if (userId === null || userId === undefined) continue;
+
+              const userSettings = await getUserSettings(userId);
+              if (!userSettings) continue;
+
+              let userServers = [];
+              if (game === 'q2') {
+                userServers = userSettings.q2servers || [];
+              } else if (game === 'qw') {
+                userServers = userSettings.qwservers || [];
+              }
+
+              if (Array.isArray(userServers)) {
+                userServers.forEach((s) => {
+                  if (s && typeof s === 'string') {
+                    uniqueServers.add(s.trim());
+                  }
+                });
+              }
+            } catch (e) {
+              log('refreshGlobalServersCache: ошибка при разборе серверов пользователя', user, e);
+            }
+          }
+        }
+
+        const allServers = Array.from(uniqueServers);
+
+        if (!Array.isArray(allServers) || allServers.length === 0) {
+          log(`refreshGlobalServersCache: для игры ${game} список серверов пуст (master+users)`);
+          return;
+        }
+
+        console.log(
+          `refreshGlobalServersCache: игра=${game}, серверов из master=${Array.isArray(serverList) ? serverList.length : 0}, ` +
+          `всего уникальных (master+users)=${allServers.length}`
+        );
+
+        // временный кэш только для этой игры
+        const newGameCache = {};
+
+        const promises = allServers.map(async (server) => {
+          const [ip, port] = server.split(':');
+          const key = `${ip}:${port}`;
+          try {
+            const { serverPlayers, serverInfo } = await queryServerDirect(game, ip, port);
+
+            newGameCache[key] = {
+              game,
+              ip,
+              port,
+              server: key,
+              serverInfo,
+              serverPlayers,
+              lastUpdated: now
+            };
+          } catch (err) {
+            log(`refreshGlobalServersCache: ошибка сервера ${server} (${game})`, err);
+            // при ошибке просто не добавляем этот сервер в новый кэш по игре
           }
         });
+
+        await Promise.allSettled(promises);
+
+        // ✅ атомарная замена кэша только по этой игре
+        globalServerCache[game] = newGameCache;
+        log(
+          `refreshGlobalServersCache: кэш для игры ${game} обновлён, серверов в кэше = ${Object.keys(newGameCache).length}`
+        );
+      } catch (err) {
+        log(`refreshGlobalServersCache: ошибка при обновлении игры ${game}:`, err);
+        // Важно: если здесь ошибка, мы НЕ перезаписываем globalServerCache[game] — старый кэш остаётся.
       }
+    });
 
-      // 2) сервера из настроек всех пользователей
-      if (Array.isArray(allUsers) && allUsers.length > 0) {
-        for (const user of allUsers) {
-          try {
-            // если getAllUsers уже возвращает полные настройки, можно будет упростить;
-            // но надёжнее сейчас ещё раз получить настройки по userId
-            const userId = user.userId !== undefined ? user.userId : null;
-            if (userId === null || userId === undefined) continue;
-
-            const userSettings = await getUserSettings(userId);
-            if (!userSettings) continue;
-
-            let userServers = [];
-            if (game === 'q2') {
-              userServers = userSettings.q2servers || [];
-            } else if (game === 'qw') {
-              userServers = userSettings.qwservers || [];
-            }
-
-            if (Array.isArray(userServers)) {
-              userServers.forEach((s) => {
-                if (s && typeof s === 'string') {
-                  uniqueServers.add(s.trim());
-                }
-              });
-            }
-          } catch (e) {
-            console.log('refreshGlobalServersCache: ошибка при разборе серверов пользователя', user, e);
-          }
-        }
-      }
-
-      const allServers = Array.from(uniqueServers);
-
-      if (!Array.isArray(allServers) || allServers.length === 0) {
-        console.log(`refreshGlobalServersCache: для игры ${game} список серверов пуст (master+users)`);
-        continue;
-      }
-
-      console.log(
-        `refreshGlobalServersCache: игра=${game}, серверов из master=${Array.isArray(serverList) ? serverList.length : 0}, ` +
-        `всего уникальных (master+users)=${allServers.length}`
-      );
-
-      const promises = allServers.map(async (server) => {
-        const [ip, port] = server.split(':');
-        const key = `${ip}:${port}`;
-        try {
-          const { serverPlayers, serverInfo } = await queryServerDirect(game, ip, port);
-
-          newCache[game][key] = {
-            game,
-            ip,
-            port,
-            server: key,
-            serverInfo,
-            serverPlayers,
-            lastUpdated: now
-          };
-        } catch (err) {
-          console.log(`refreshGlobalServersCache: ошибка сервера ${server} (${game})`, err);
-          // при ошибке просто не добавляем этот сервер в новый снэпшот
-        }
-      });
-
-      await Promise.allSettled(promises);
-    }
-
-    // 👇 атомарная замена ссылок на новый снэпшот
-    globalServerCache.q2 = newCache.q2;
-    globalServerCache.qw = newCache.qw;
-
-    //console.log('refreshGlobalServersCache: глобальный кэш по серверам обновлён');
+    // Ждём завершения всех игровых задач, но каждый "поток" уже сам обновил свой кусок кэша.
+    await Promise.allSettled(gamePromises);
   } catch (error) {
-    console.log('Ошибка при обновлении глобального кэша серверов:', error);
-    // в случае ошибки старый globalServerCache остаётся доступным
+    log('Ошибка при обновлении глобального кэша серверов:', error);
+    // В случае общей ошибки существующий globalServerCache остаётся нетронутым
   } finally {
     isGlobalServerCacheRefreshing = false;
   }
