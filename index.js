@@ -267,12 +267,56 @@ async function helpAdmin(ctx) {
 Версия бота: *${config.VERSION}*
 `;
 
-    ctx.reply(info, { parse_mode: 'Markdown' });
+    await ctx.reply(info, { parse_mode: 'Markdown' });
     const chatId = ctx.chat.id;
     await updateUserSettings(userId, { chatId: chatId });
 
   } catch (error) { console.log(`Ошибка: `, error) };
 }
+
+/*
+// Глобальный middleware для "тихих" чатов (обрабатывает все команды, кроме /silent)
+bot.use(async (ctx, next) => {
+  try {
+    // Определяем chatId для разных типов апдейтов
+    const chat =
+      ctx.chat ||
+      (ctx.message && ctx.message.chat) ||
+      (ctx.callbackQuery && ctx.callbackQuery.message && ctx.callbackQuery.message.chat);
+
+    const chatId = chat ? chat.id : null;
+    if (!chatId) {
+      return next(); // Если нет chatId, пропускаем
+    }
+
+    const text = ctx.message && ctx.message.text ? ctx.message.text.trim() : '';
+    
+    // Если команда /silent, всегда пропускаем её
+    if (text && (text.startsWith('/silent') || text.startsWith('/silent@'))) {
+      return next();
+    }
+
+    // Читаем настройки бота
+    const botSettings = await getUserSettings(0);
+    const silentChats = botSettings && Array.isArray(botSettings.silentChats)
+      ? botSettings.silentChats
+      : [];
+
+    const isSilent = silentChats.includes(chatId);
+
+    if (isSilent) {
+      // В этом чате бот молчит для всех команд, кроме /silent
+      return; // Не обрабатываем команды
+    }
+
+    return next(); // Обрабатываем команду
+  } catch (err) {
+    console.log('Silent middleware error:', err);
+    return next(); // Не блокируем выполнение в случае ошибки
+  }
+});
+*/
+
 
 // Глобальный middleware для "тихих" чатов
 bot.use(async (ctx, next) => {
@@ -571,7 +615,8 @@ async function addGames(ctx, games) {
     existingGames = userSettings && userSettings.games != undefined ? userSettings.games : [];
     //console.log('existingGames=' + existingGames.join(', '));
     if (games.length == 0 || !isValidGames(games)) {
-      return ctx.reply(`Доступны следующие игры: ${config.GAMES}.\nВаши игры: ${existingGames.join(', ')}`);
+      await ctx.reply(`Доступны следующие игры: ${config.GAMES}.\nВаши игры: ${existingGames.join(', ')}`);
+      return;
     }
 
     for (let game of games) {
@@ -579,10 +624,12 @@ async function addGames(ctx, games) {
       game = formatName(game);
 
       if (!isValidPlayerName(game)) {
-        return ctx.reply(`Название игры может одной или нескольких из списка: ${config.GAMES}.`);
+        await ctx.reply(`Название игры может одной или нескольких из списка: ${config.GAMES}.`);
+        return;
       }
       if (existingGames.some(existingGame => matchPlayer(existingGame, game))) {
-        return ctx.reply(`Игра ${game} уже добавлена. Ваши игры: ${existingGames.join(', ')}`);
+        await ctx.reply(`Игра ${game} уже добавлена. Ваши игры: ${existingGames.join(', ')}`);
+        return;
       }
 
       existingGames.push(game.toLowerCase());
@@ -599,11 +646,12 @@ async function addGames(ctx, games) {
       monitoringEnabledText = `Мониторинг включён.\n`;
     }
 
-    ctx.reply(`Игры добавлены: ${existingGames.join(', ')}
+    await ctx.reply(`Игры добавлены: ${existingGames.join(', ')}
 ${monitoringEnabledText}
 Используйте /ag для добавления игр для поиска и /ap для добавления игроков для мониторинга,
 🕓 /timer для установки интервала автоматического мониторинга по заданным вами настройкам.
 Просмотр информации по вашим настройкам: /info`);
+    return;
   } catch (error) { console.log(`Ошибка: `, error) };
 }
 
@@ -672,7 +720,8 @@ async function delGame(ctx, games) {
 
     if (games == undefined || games.length == 0) {
       //console.log(userSettings.players);
-      return ctx.reply(`Укажите в параметрах команды игру, которую хотите удалить.`);
+      await ctx.reply(`Укажите в параметрах команды игру, которую хотите удалить.`);
+      return;
     }
 
     console.log('0');
@@ -681,7 +730,8 @@ async function delGame(ctx, games) {
 
     if (!userSettings || existingGames == undefined || existingGames.length == 0) {
       //console.log(userSettings.players);
-      return ctx.reply(`У вас нет настроек игр (нечего удалять).`);
+      await ctx.reply(`У вас нет настроек игр (нечего удалять).`);
+      return;
     }
 
     console.log("1");
@@ -692,7 +742,8 @@ async function delGame(ctx, games) {
       let game = games[i];
       if (!existingGames.includes(game.toLowerCase())) {
         //console.log(userSettings.players);
-        return ctx.reply(`Игра(ы) ${game} не найдена(ы) в ваших настройках.\nВаши игры: ${existingGames.join(', ')}`);
+        await ctx.reply(`Игра(ы) ${game} не найдена(ы) в ваших настройках.\nВаши игры: ${existingGames.join(', ')}`);
+        return;
       }
       existingGames = existingGames.filter(p => p.toLowerCase() !== game.toLowerCase());
     };
@@ -747,12 +798,14 @@ bot.command('dg', async (ctx) => {
 bot.command('users', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
 
     const users = await getAllUsers();
     if (users.length === 0) {
-      return ctx.reply('Нет зарегистрированных пользователей.');
+      await ctx.reply('Нет зарегистрированных пользователей.');
+      return;
     }
 
     let message = 'Список пользователей:\n';
@@ -788,7 +841,8 @@ bot.command('users', async (ctx) => {
 bot.command('user', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
 
     const userId = ctx.message.text.split(' ')[1];
@@ -796,7 +850,8 @@ bot.command('user', async (ctx) => {
     const userSettings = await getUserSettings(userId);
 
     if (!userSettings) {
-      return ctx.reply(`Пользователь с ID ${userId} не найден.`);
+      await ctx.reply(`Пользователь с ID ${userId} не найден.`);
+      return;
     }
 
     try {
@@ -835,7 +890,8 @@ bot.command('deluser', async (ctx) => {
     const isOwner = ctx.from.id === config.OWNER_ID || false;
     console.log('ctx.from.userId = ' + ctx.from.userId + ', OWNER_ID = ' + config.OWNER_ID);
     if (!isOwner) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
 
     const userId = ctx.message.text.split(' ')[1];
@@ -843,7 +899,8 @@ bot.command('deluser', async (ctx) => {
     const userSettings = await getUserSettings(userId);
 
     if (!userSettings) {
-      return ctx.reply(`Пользователь с ID ${userId} не найден.`);
+      await ctx.reply(`Пользователь с ID ${userId} не найден.`);
+      return;
     }
 
     try {
@@ -862,7 +919,8 @@ bot.command('delallusers', async (ctx) => {
   try {
     const isOwner = ctx.from.id === config.OWNER_ID || false;
     if (!isOwner) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return
     }
 
     const userId = ctx.message.text.split(' ')[1];
@@ -886,25 +944,35 @@ bot.command('delallusers', async (ctx) => {
 bot.command('ban', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
 
     const userId = ctx.message.text.split(' ')[1];
+    if (userId == null || userId == '') {
+      await ctx.reply('Укажите ID прользователя.');
+      return;
+    }
     await banUser(userId); // Предполагается, что функция реализована в db.js
-    ctx.reply(`Пользователь с ID ${userId} заблокирован.`);
-  } catch (error) { console.log(`Ошибка: ${error.message}`) };
+    await ctx.reply(`Пользователь с ID ${userId} заблокирован.`);
+  } catch (error) { console.log(`Ошибка: ${error.message}`, error) };
 });
 
 // Команда /unban <userID>
 bot.command('unban', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
 
     const userId = ctx.message.text.split(' ')[1];
+    if (userId == null || userId == '') {
+      await ctx.reply('Укажите ID прользователя.');
+      return;
+    }
     await unbanUser(userId); // Предполагается, что функция реализована в db.js
-    ctx.reply(`Пользователь с ID ${userId} разблокирован.`);
+    await ctx.reply(`Пользователь с ID ${userId} разблокирован.`);
   } catch (error) { console.log(`Ошибка: `, error); }
 });
 
@@ -914,12 +982,14 @@ bot.command('unban', async (ctx) => {
 bot.command('banlist', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
 
     const bannedUsers = await getBannedUsers(); // Предполагается, что функция реализована в db.js
     if (bannedUsers.length === 0) {
-      return ctx.reply('Нет заблокированных пользователей.');
+      await ctx.reply('Нет заблокированных пользователей.');
+      return;
     }
 
     let message = 'Список заблокированных пользователей:\n';
@@ -952,20 +1022,22 @@ bot.command('banlist', async (ctx) => {
 bot.command('addadm', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
     const userId = ctx.message.text.split(' ')[1];
     //  const userSettings = await getUserSettings(userId);
     const userSettings = await getUserSettings(userId);
 
     if (!userSettings) {
-      return ctx.reply(`Пользователь с ID ${userId} не найден.`);
+      await ctx.reply(`Пользователь с ID ${userId} не найден.`);
+      return;
     }
 
     if (await addAdmin(userId)) {
-      ctx.reply(`Пользователь ${userId} добавлен в администраторы.`);
+      await ctx.reply(`Пользователь ${userId} добавлен в администраторы.`);
     } else {
-      ctx.reply(`Не удалось добавить пользователя с ID ${userId} в администраторы`);
+      await ctx.reply(`Не удалось добавить пользователя с ID ${userId} в администраторы`);
     }
   } catch (error) { console.log(`Ошибка: ${error.message}`) };
 });
@@ -974,12 +1046,13 @@ bot.command('addadm', async (ctx) => {
 bot.command('deladm', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
 
     const userId = ctx.message.text.split(' ')[1];
     await removeAdmin(userId); // Предполагается, что функция реализована в db.js
-    ctx.reply(`Пользователь с ID ${userId} удален из администраторов.`);
+    await ctx.reply(`Пользователь с ID ${userId} удален из администраторов.`);
   } catch (error) { console.log(`Ошибка: `, error); }
 });
 
@@ -989,12 +1062,14 @@ bot.command('deladm', async (ctx) => {
 bot.command('admlist', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      await ctx.reply('У вас нет прав для использования этой команды.');
+      return;
     }
 
     const admins = await getAdmins(); // Предполагается, что функция реализована в db.js
     if (admins.length === 0) {
-      return ctx.reply('Нет администраторов.');
+      await ctx.reply('Нет администраторов.');
+      return;
     }
 
     let message = 'Список администраторов:\n';
@@ -1013,11 +1088,12 @@ bot.command('admlist', async (ctx) => {
 bot.command('delalladm', async (ctx) => {
   try {
     if (ctx.from.id !== ownerId) {
-      return ctx.reply('Только владелец может использовать эту команду.');
+      await ctx.reply('Только владелец может использовать эту команду.');
+      return;
     }
 
     await removeAllAdmins(); // Предполагается, что функция реализована в db.js
-    ctx.reply('Все администраторы были удалены.');
+    await ctx.reply('Все администраторы были удалены.');
   } catch (error) { console.log(`Ошибка: `, error); }
 });
 
@@ -1130,10 +1206,10 @@ bot.command('check', async (ctx) => {
     const userId = ctx.from.id;
     userContexts[userId] = ctx; // Сохраняем контекст пользователя
     const groupUsernames = ['@QuakeJourney', '@Quake2Workshop']; // Массив @-имен групп
-    checkUserInGroups(userId, groupUsernames)
+    await checkUserInGroups(userId, groupUsernames)
       .then(results => {
         console.log('Результаты проверки:', results);
-        ctx.reply('Результаты проверки:' + results);
+        return ctx.reply('Результаты проверки:' + JSON.stringify(results, null, 2));
       })
       .catch(err => {
         console.log('Ошибка:', err);
@@ -1160,28 +1236,28 @@ async function addPlayers(ctx, players, type) {
     if (type == 'players') {
       existingPlayers = userSettings && userSettings.players != undefined ? userSettings.players : [];
       if (players.length == 0 || players.length > config.PLAYERS_COUNT_LIMIT) {
-        return ctx.reply(`Вы можете добавить от 1 до ${config.PLAYERS_COUNT_LIMIT - existingPlayers.length} игроков.\nВаши игроки: ${existingPlayers.join(', ')}`);
+        return await ctx.reply(`Вы можете добавить от 1 до ${config.PLAYERS_COUNT_LIMIT - existingPlayers.length} игроков.\nВаши игроки: ${existingPlayers.join(', ')}`);
       }
       if (existingPlayers.length >= config.PLAYERS_COUNT_LIMIT) {
-        return ctx.reply('Достигнуто максимальное количество игроков. Удалите кого-то перед добавлением (/delplayer или /dp).');
+        return await ctx.reply('Достигнуто максимальное количество игроков. Удалите кого-то перед добавлением (/delplayer или /dp).');
       }
     }
     else if (type == 'playersfilter') {
       existingPlayers = userSettings && userSettings.playersFilter != undefined ? userSettings.playersFilter : [];
       if (players.length == 0 || players.length > config.PLAYERS_COUNT_LIMIT) {
-        return ctx.reply(`Вы можете добавить от 1 до ${config.PLAYERS_COUNT_LIMIT - existingPlayers.length} игроков для фильтра.\nВаш текущий фильтр: ${existingPlayers.join(', ')}`);
+        return await ctx.reply(`Вы можете добавить от 1 до ${config.PLAYERS_COUNT_LIMIT - existingPlayers.length} игроков для фильтра.\nВаш текущий фильтр: ${existingPlayers.join(', ')}`);
       }
       if (existingPlayers.length >= config.PLAYERS_COUNT_LIMIT) {
-        return ctx.reply('Достигнуто максимальное количество игроков. Удалите кого-то перед добавлением (/delplayerfilter ли /dpf).');
+        return await ctx.reply('Достигнуто максимальное количество игроков. Удалите кого-то перед добавлением (/delplayerfilter ли /dpf).');
       }
     }
     else if (type == 'spfilter') {
       existingPlayers = userSettings && userSettings.spFilter != undefined ? userSettings.spFilter : [];
       if (players.length < 2 || players.length > config.PLAYERS_COUNT_LIMIT - 1) {
-        return ctx.reply(`Вы можете добавить от 1 до ${config.PLAYERS_COUNT_LIMIT - existingPlayers.length} записей фильтра сервер-игрок.\nИспользуйте команду /aspf <server:ip\\player>,\nнапример /aspf q2.playground.ru:27910 pp\nВаш текущий фильтр: ${existingPlayers.join(', ')}`);
+        return await ctx.reply(`Вы можете добавить от 1 до ${config.PLAYERS_COUNT_LIMIT - existingPlayers.length} записей фильтра сервер-игрок.\nИспользуйте команду /aspf <server:ip\\player>,\nнапример /aspf q2.playground.ru:27910 pp\nВаш текущий фильтр: ${existingPlayers.join(', ')}`);
       }
       if (existingPlayers.length >= config.PLAYERS_COUNT_LIMIT) {
-        return ctx.reply('Достигнуто максимальное количество пар фильтра сервер-игрок. Удалите что нибудь перед добавлением (/dspf).');
+        return await ctx.reply('Достигнуто максимальное количество пар фильтра сервер-игрок. Удалите что нибудь перед добавлением (/dspf).');
       }
     }
 
@@ -1198,11 +1274,11 @@ async function addPlayers(ctx, players, type) {
         player = formatName(player);
 
         if (!isValidPlayerName(player)) {
-          return ctx.reply(`🕵️ Имя игрока должно состоять из минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов). Если используется маска, то минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов) + одна или две звездочки.`);
+          return await ctx.reply(`🕵️ Имя игрока должно состоять из минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов). Если используется маска, то минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов) + одна или две звездочки.`);
         }
 
         if (existingPlayers.some(existingPlayer => matchPlayer(existingPlayer, player))) {
-          return ctx.reply(`🕵️ Игрок ${player} уже добавлен. Ваши игроки: ${existingPlayers.join(', ')}`);
+          return await ctx.reply(`🕵️ Игрок ${player} уже добавлен. Ваши игроки: ${existingPlayers.join(', ')}`);
         }
         existingPlayers.push(player.toLowerCase());
       }
@@ -1214,13 +1290,13 @@ async function addPlayers(ctx, players, type) {
       let server = players[0];
       let player = formatName(players[1]);
       //console.log('server=' + server + ', player=' + player);
-      if (!isValidServer(server)) return ctx.reply(`🖥️Адрес сервера должнен быть указан в виде IPAddress:Port или Domen:Port, например, 212.42.38.88:27910 или q2.playground.ru:27910\nВы пытались добавить сервер: '${server}'\nУкажите верно параметры команды, например: /aspf 212.42.38.88:27910 pp`);
-      if (!isValidPlayerName(player)) return ctx.reply(`🕵️ Имя игрока должно состоять из минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов). Если используется маска, то минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов) + одна или две звездочки.\nУкажите верно параметры команды, например: /aspf q2.playground.ru pp`);
+      if (!isValidServer(server)) return await ctx.reply(`🖥️Адрес сервера должнен быть указан в виде IPAddress:Port или Domen:Port, например, 212.42.38.88:27910 или q2.playground.ru:27910\nВы пытались добавить сервер: '${server}'\nУкажите верно параметры команды, например: /aspf 212.42.38.88:27910 pp`);
+      if (!isValidPlayerName(player)) return await ctx.reply(`🕵️ Имя игрока должно состоять из минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов). Если используется маска, то минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов) + одна или две звездочки.\nУкажите верно параметры команды, например: /aspf q2.playground.ru pp`);
 
       for (i = 0; i < existingPlayers.length; i++) {
         let existingServer = existingPlayers[i].split(`\\`)[0];
         let existingPlayer = existingPlayers[i].split(`\\`)[1];
-        if (matchServer(existingServer, server) && matchPlayer(existingPlayer, player)) return ctx.reply(`Такая пара сервер-игрок уже добавлена. Ваш фильтр: ${existingPlayers.join(', ').replace('\\', ' ')}`);
+        if (matchServer(existingServer, server) && matchPlayer(existingPlayer, player)) return await ctx.reply(`Такая пара сервер-игрок уже добавлена. Ваш фильтр: ${existingPlayers.join(', ').replace('\\', ' ')}`);
       }
       let sp = server + `\\` + player;
       existingPlayers.push(sp);
@@ -1365,55 +1441,55 @@ async function delPlayers(ctx, players, type) {
 
       if (players == undefined || players.length == 0) {
         //console.log(userSettings.players);
-        return ctx.reply(`Укажите в параметрах команды игрока(ов), которого(ых) хотите удалить.\nНапример: /dp David`);
+        return await ctx.reply(`Укажите в параметрах команды игрока(ов), которого(ых) хотите удалить.\nНапример: /dp David`);
       }
 
       existingPlayers = userSettings.players || [];
       if (!userSettings || existingPlayers == undefined || existingPlayers.length == 0) {
         //console.log(userSettings.players);
-        return ctx.reply(`У вас нет настроек игроков (нечего удалять).`);
+        return await ctx.reply(`У вас нет настроек игроков (нечего удалять).`);
       }
       for (let i = 0; i < players.length; i++) {
         let player = players[i];
         console.log('player=' + player);
         if (!existingPlayers.includes(player.toLowerCase())) {
           //console.log(userSettings.players);
-          return ctx.reply(`Игрок ${player} не найден(ы) в ваших настройках.\nВаши игроки: ${existingPlayers.join(', ')}`);
+          return await ctx.reply(`Игрок ${player} не найден(ы) в ваших настройках.\nВаши игроки: ${existingPlayers.join(', ')}`);
         }
         existingPlayers = existingPlayers.filter(p => p.toLowerCase() !== player.toLowerCase());
       };
       await updateUserSettings(userId, { players: existingPlayers });
-      ctx.reply('🕵️ Игроки удалены: ' + players.join(','));
+      await ctx.reply('🕵️ Игроки удалены: ' + players.join(','));
     }
     else if (type == 'playersfilter') {
 
       if (players == undefined || players.length == 0) {
         //console.log(userSettings.players);
-        return ctx.reply(`Укажите в параметрах команды игрока(ов), которого(ых) хотите удалить из фильтра.\nНапример: /dpf David`);
+        return await ctx.reply(`Укажите в параметрах команды игрока(ов), которого(ых) хотите удалить из фильтра.\nНапример: /dpf David`);
       }
 
       existingPlayers = userSettings.playersFilter || [];
       if (!userSettings || existingPlayers == undefined || existingPlayers.length == 0) {
         //console.log(userSettings.players);
-        return ctx.reply(`У вас нет настроек фильтров игроков (нечего удалять).`);
+        return await ctx.reply(`У вас нет настроек фильтров игроков (нечего удалять).`);
       }
       for (let i = 0; i < players.length; i++) {
         let player = players[i];
         console.log('player=' + player);
         if (!existingPlayers.includes(player.toLowerCase())) {
           //console.log(userSettings.players);
-          return ctx.reply(`Игрок ${player} не найден(ы) в ваших настройках фильтра игроков.\nВаши игроки в фильтре: ${existingPlayers.join(', ')}`);
+          return await ctx.reply(`Игрок ${player} не найден(ы) в ваших настройках фильтра игроков.\nВаши игроки в фильтре: ${existingPlayers.join(', ')}`);
         }
         existingPlayers = existingPlayers.filter(p => p.toLowerCase() !== player.toLowerCase());
       };
       await updateUserSettings(userId, { playersFilter: existingPlayers });
-      ctx.reply('🕵️ Игроки удалены из фильтра: ' + players.join(','));
+      await ctx.reply('🕵️ Игроки удалены из фильтра: ' + players.join(','));
     }
     else if (type == 'spfilter') {
 
       if (players == undefined || players.length == 0) {
         //console.log(userSettings.players);
-        return ctx.reply(`Укажите в параметрах команды пару сервер - игрок, которые хотите удалить.\nНапример: /dspf q2.playground.ru:27910 David`);
+        return await ctx.reply(`Укажите в параметрах команды пару сервер - игрок, которые хотите удалить.\nНапример: /dspf q2.playground.ru:27910 David`);
       }
 
       //existingPlayers = userSettings.spFilter || [];
@@ -1421,7 +1497,7 @@ async function delPlayers(ctx, players, type) {
 
       if (!userSettings || existingPlayers == undefined || existingPlayers.length == 0) {
         //console.log(userSettings.players);
-        return ctx.reply(`У вас нет настроек фильтров сервер - игрок (нечего удалять).`);
+        return await ctx.reply(`У вас нет настроек фильтров сервер - игрок (нечего удалять).`);
       }
 
       let server = players[0];
@@ -1431,18 +1507,18 @@ async function delPlayers(ctx, players, type) {
         ;
         //      if (!existingPlayers.includes(sp.toLowerCase())) {
         //console.log(userSettings.players);
-        return ctx.reply(`Значение ${server} ${player} не найдено в ваших настройках фильтра сервер -игрок.\nВаши текущие параметры фильтра: ${formatServers(existingPlayers)}`);
+        return await ctx.reply(`Значение ${server} ${player} не найдено в ваших настройках фильтра сервер -игрок.\nВаши текущие параметры фильтра: ${formatServers(existingPlayers)}`);
       }
       existingPlayers = existingPlayers.filter(p => p.toLowerCase() !== sp.toLowerCase());
       await updateUserSettings(userId, { spFilter: existingPlayers });
-      ctx.reply('🖥️🕵️ Настройки фильтра удалены: ' + server + ' ' + player);
+      await ctx.reply('🖥️🕵️ Настройки фильтра удалены: ' + server + ' ' + player);
     }
 
 
     if (!await checkCanTimer(userId)) {
       await updateUserSettings(userId, { timerEnabled: 0 });
       await stopAutoSearch(userId);
-      ctx.reply(`👁️ Игроков и серверов для мониторинга больше нет, поэтому мониторинг отключён.`);
+      await ctx.reply(`👁️ Игроков и серверов для мониторинга больше нет, поэтому мониторинг отключён.`);
     }
 
   } catch (error) { console.log(`Ошибка: `, error); }
@@ -1578,7 +1654,7 @@ async function addServers(ctx, servers, game) {
     }
 
     /*    if (servers.length === 0 || servers.length > config.SERVERS_COUNT_LIMIT) {
-          return ctx.reply(`Вы можете добавить от 1 до ${config.SERVERS_COUNT_LIMIT} серверов.`);
+          return await ctx.reply(`Вы можете добавить от 1 до ${config.SERVERS_COUNT_LIMIT} серверов.`);
         }
     */
     for (const server of servers) {
@@ -1628,7 +1704,7 @@ bot.command('addserverq2', async (ctx) => {
     await addServers(ctx, servers, 'q2');
   } catch (error) {
     console.log(`Ошибка: `, error);
-    ctx.reply(`Укажите Q2 сервер(а) в формате ServerIP(или домен):Port/ServerName, например - /addserverq2 q2.playground.ru:27910\nЕсли вы хотите указать несколько серверов, то разделяйте их пробелами.\nВы также можете использовать сокращённый формат команды - /asq2`);
+    await ctx.reply(`Укажите Q2 сервер(а) в формате ServerIP(или домен):Port/ServerName, например - /addserverq2 q2.playground.ru:27910\nЕсли вы хотите указать несколько серверов, то разделяйте их пробелами.\nВы также можете использовать сокращённый формат команды - /asq2`);
   }
 });
 
@@ -1638,7 +1714,7 @@ bot.command('asq2', async (ctx) => {
     await addServers(ctx, servers, 'q2');
   } catch (error) {
     console.log(`Ошибка: `, error);
-    ctx.reply(`Укажите Q2 сервер(а) в формате ServerIP(или домен):Port/ServerName, например - /addserverq2 q2.playground.ru:27910\nЕсли вы хотите указать несколько серверов, то разделяйте их пробелами.\nВы также можете использовать сокращённый формат команды - /asq2`);
+    await ctx.reply(`Укажите Q2 сервер(а) в формате ServerIP(или домен):Port/ServerName, например - /addserverq2 q2.playground.ru:27910\nЕсли вы хотите указать несколько серверов, то разделяйте их пробелами.\nВы также можете использовать сокращённый формат команды - /asq2`);
   }
 });
 
@@ -1651,7 +1727,7 @@ bot.command('addserverqw', async (ctx) => {
     await addServers(ctx, servers, 'qw');
   } catch (error) {
     console.log(`Ошибка: `, error);
-    ctx.reply(`Укажите QW сервер(а) в формате ServerIP(или домен):Port/ServerName, например - /addserverqw 35.185.44.174:27500\nЕсли вы хотите указать несколько серверов, то разделяйте их пробелами.\nВы также можете использовать сокращённый формат команды - /asqw`);
+    await ctx.reply(`Укажите QW сервер(а) в формате ServerIP(или домен):Port/ServerName, например - /addserverqw 35.185.44.174:27500\nЕсли вы хотите указать несколько серверов, то разделяйте их пробелами.\nВы также можете использовать сокращённый формат команды - /asqw`);
   }
 });
 
@@ -1661,7 +1737,7 @@ bot.command('asqw', async (ctx) => {
     await addServers(ctx, servers, 'qw');
   } catch (error) {
     console.log(`Ошибка: `, error);
-    ctx.reply(`Укажите Q2 сервер(а) в формате ServerIP(или домен):Port/ServerName, например - /addserverqw 35.185.44.174:27500\nЕсли вы хотите указать несколько серверов, то разделяйте их пробелами.\nВы также можете использовать сокращённый формат команды - /asqw`);
+    await ctx.reply(`Укажите Q2 сервер(а) в формате ServerIP(или домен):Port/ServerName, например - /addserverqw 35.185.44.174:27500\nЕсли вы хотите указать несколько серверов, то разделяйте их пробелами.\nВы также можете использовать сокращённый формат команды - /asqw`);
   }
 });
 
@@ -1889,12 +1965,12 @@ async function addMaps(ctx, maps, game) {
     if (game == 'qw') existingMaps = userSettings && userSettings.qwmaps != undefined ? userSettings.qwmaps : [];
 
     if (maps.length == 0 || ((maps.length + existingMaps.length) > config.MAPS_COUNT_LIMIT)) {
-      return ctx.reply(`Вы можете добавить от 1 до ${config.MAPS_COUNT_LIMIT - existingMaps.length} карт(ы).\nВаши карты: ${existingMaps.join(', ')}`);
+      return await ctx.reply(`Вы можете добавить от 1 до ${config.MAPS_COUNT_LIMIT - existingMaps.length} карт(ы).\nВаши карты: ${existingMaps.join(', ')}`);
     }
 
     /*
     if (maps.length === 0 || maps.length > config.MAPS_COUNT_LIMIT) {
-      return ctx.reply(`Вы можете добавить от 1 до ${config.MAPS_COUNT_LIMIT} карт.`);
+      return await ctx.reply(`Вы можете добавить от 1 до ${config.MAPS_COUNT_LIMIT} карт.`);
     }
       
     const userSettings = await getUserSettings(userId);
@@ -1906,21 +1982,21 @@ async function addMaps(ctx, maps, game) {
       map = formatName(map);
 
       if (!isValidMapName(map)) {
-        return ctx.reply(`Название карты должно состоять из минимум ${config.MAPS_NAME_LIMIT} символа(ов). Если используется маска, то минимум ${config.MAPS_NAME_MASK_LIMIT} символа(ов) + одна или две звездочки.`);
+        return await ctx.reply(`Название карты должно состоять из минимум ${config.MAPS_NAME_LIMIT} символа(ов). Если используется маска, то минимум ${config.MAPS_NAME_MASK_LIMIT} символа(ов) + одна или две звездочки.`);
       }
       if (existingMaps.some(existingMap => matchPlayer(existingMap, map))) {
-        return ctx.reply(`Карта ${map} уже добавлена. Ваши карты: ${existingMaps.join(', ')}`);
+        return await ctx.reply(`Карта ${map} уже добавлена. Ваши карты: ${existingMaps.join(', ')}`);
       }
 
       if (existingMaps.length >= config.MAPS_COUNT_LIMIT) {
-        return ctx.reply('Достигнуто максимальное число карт. Удалите что нибудь перед добавлением (/delmapq2).');
+        return await ctx.reply('Достигнуто максимальное число карт. Удалите что нибудь перед добавлением (/delmapq2).');
       }
       existingMaps.push(map.toLowerCase());
     }
 
     if (game == 'q2') await updateUserSettings(userId, { q2maps: existingMaps });
     if (game == 'qw') await updateUserSettings(userId, { qwmaps: existingMaps });
-    ctx.reply(`Карты добавлены: ${existingMaps.join(', ')}
+    await ctx.reply(`Карты добавлены: ${existingMaps.join(', ')}
 Используйте /ag для добавления игр для поиска и 🕓 /timer для установки интервала автоматического мониторинга по заданным вами настройкам.
 Просмотр информации по вашим настройкам: /info`);
   } catch (error) { console.log(`Ошибка: `, error); }
@@ -2055,11 +2131,11 @@ async function delMap(ctx, map, game) {
     if (game == 'qw') existingMaps = userSettings && userSettings.qwmaps != undefined && userSettings.qwmaps != '' ? userSettings.qwmaps : [];
 
     if (!map || map == undefined || map.trim() == '') {
-      return ctx.reply(`Укажите название карты, которую вы хотите удалить из настроек ваших карт в игре ${config.GAMES_TITLES[game]}.\nВаши ${game} карты: ${existingMaps.join(', ')}`);
+      return await ctx.reply(`Укажите название карты, которую вы хотите удалить из настроек ваших карт в игре ${config.GAMES_TITLES[game]}.\nВаши ${game} карты: ${existingMaps.join(', ')}`);
     }
 
     if (!existingMaps.includes(map.toLowerCase())) {
-      return ctx.reply(`Карта ${map} не найдена в ваших настройках карт.\nВаши ${game} карты: ${existingMaps.join(', ')}`);
+      return await ctx.reply(`Карта ${map} не найдена в ваших настройках карт.\nВаши ${game} карты: ${existingMaps.join(', ')}`);
     }
 
     const updatedMaps = existingMaps.filter(p => p.toLowerCase() !== map.toLowerCase());
@@ -2077,13 +2153,13 @@ async function delMap(ctx, map, game) {
       mapsLeft = `${qwmaps.length > 0 ? qwmaps.join(', ') : 'нет - используйте /amqw'}`;
     }
 
-    ctx.reply(`Карта ${map} удалена.\nОстальные ${game} карты:\n${mapsLeft}`);
+    await ctx.reply(`Карта ${map} удалена.\nОстальные ${game} карты:\n${mapsLeft}`);
 
     userSettings = await getUserSettings(userId);
     /* if ((userSettings.q2servers === undefined || userSettings.q2servers.join("").trim() === '') && (userSettings.players === undefined || userSettings.players.join("").trim() === '')) {
        await updateUserSettings(userId, { timer: 0 });
        stopAutoSearch(userId);
-       ctx.reply(`Игроков и серверов для мониторинга больше нет, поэтому таймер обновления сброшен на 0, автообновление выключено.`);
+       await ctx.reply(`Игроков и серверов для мониторинга больше нет, поэтому таймер обновления сброшен на 0, автообновление выключено.`);
      } */
   } catch (error) { console.log(`Ошибка: `, error); }
 }
@@ -2186,12 +2262,12 @@ bot.command('delallpf', async (ctx) => {
     await updateUserSettings(userId, { playersFilter: [] });
     const chatId = ctx.chat.id;
     await updateUserSettings(userId, { chatId: chatId });
-    ctx.reply('Все ваши фильтры игроков удалены.');
+    await ctx.reply('Все ваши фильтры игроков удалены.');
 
     if (!await checkCanTimer(userId)) {
       await updateUserSettings(userId, { timerEnabled: 0 });
       await stopAutoSearch(userId);
-      ctx.reply(`Игр или игроков и серверов для мониторинга больше нет, поэтому поэтому мониторинг отключён.`);
+      await ctx.reply(`Игр или игроков и серверов для мониторинга больше нет, поэтому поэтому мониторинг отключён.`);
     }
 
   } catch (error) { console.log(`Ошибка: `, error); }
@@ -2210,12 +2286,12 @@ bot.command('delalls', async (ctx) => {
 
     const chatId = ctx.chat.id;
     await updateUserSettings(userId, { chatId: chatId });
-    ctx.reply('Все ваши сервера удалены.');
+    await ctx.reply('Все ваши сервера удалены.');
 
     if (!await checkCanTimer(userId)) {
       await updateUserSettings(userId, { timerEnabled: 0 });
       await stopAutoSearch(userId);
-      ctx.reply(`Игра или игроков и серверов для мониторинга больше нет, поэтому мониторинг отключён.`);
+      await ctx.reply(`Игра или игроков и серверов для мониторинга больше нет, поэтому мониторинг отключён.`);
     }
 
   } catch (error) { console.log(`Ошибка: `, error); }
@@ -2235,7 +2311,7 @@ bot.command('delallm', async (ctx) => {
 
     const chatId = ctx.chat.id;
     await updateUserSettings(userId, { chatId: chatId });
-    ctx.reply('Все ваши карты удалены.');
+    await ctx.reply('Все ваши карты удалены.');
     userSettings = await getUserSettings(userId);
 
   } catch (error) { console.log(`Ошибка: `, error); }
@@ -2365,9 +2441,8 @@ async function info(ctx) {
     if (isOwner) Message = `✅  Вы - владелец бота.\n\n` + Message;
     //"⚠️ SELL" : "✅  BUY"
     try {
-      ctx.reply(Message);
-    }
-    catch (error) { console.log(`Ошибка: `, error) };
+      await ctx.reply(Message);
+    } catch (error) { console.log(`Ошибка: `, error) };
 
   } catch (error) { console.log(`Ошибка: `, error) };
 }
@@ -2397,13 +2472,13 @@ async function timer(ctx) { //функция для установки тайм�
     const timerValue = parseInt(ctx.message.text.split(' ')[1]);
     const timer = userSettings.timer !== undefined ? userSettings.timer : 'не установлен';
     if (isNaN(timerValue) || timerValue < 0 || (timerValue > 0 && timerValue < config.MIN_TIMER)) {
-      return ctx.reply(`Укажите положительное значение таймера от ${config.MIN_TIMER} секунд(ы) или больше, или 0 для отключения.\nТекущее значение: ${timer}.`);
+      return await ctx.reply(`Укажите положительное значение таймера от ${config.MIN_TIMER} секунд(ы) или больше, или 0 для отключения.\nТекущее значение: ${timer}.`);
     }
     let prevTimerEnabled = userSettings.timerEnabled;
     prevTimerEnabled = (!prevTimerEnabled || prevTimerEnabled == undefined || prevTimerEnabled == '' || prevTimerEnabled == 0) ? 0 : prevTimerEnabled;
 
     await updateUserSettings(userId, { timer: timerValue });
-    ctx.reply(`🕓 Таймер установлен на ${timerValue} секунд(ы).`);
+    await ctx.reply(`🕓 Таймер установлен на ${timerValue} секунд(ы).`);
 
     if (timerValue > 0) {
       userSettings = await getUserSettings(userId);
@@ -2418,12 +2493,12 @@ async function timer(ctx) { //функция для установки тайм�
         await updateUserSettings(userId, { timer: timerValue });
         await stopAutoSearch(userId); //на всякий случай
         await startAutoSearch(userId, timerValue);
-        if (prevTimerEnabled == 0) ctx.reply(`👁️ Мониторинг включён.\nТекущий таймер обновления: ${userSettings.timer}\nВаши настройки: /i\nЕсли вы хотите отключить мониторинг, воспользуйтесь командой 🕓 /timer 0`);
+        if (prevTimerEnabled == 0) await ctx.reply(`👁️ Мониторинг включён.\nТекущий таймер обновления: ${userSettings.timer}\nВаши настройки: /i\nЕсли вы хотите отключить мониторинг, воспользуйтесь командой 🕓 /timer 0`);
       }
     } else {
       await updateUserSettings(userId, { timerEnabled: 0 });
       await stopAutoSearch(userId);
-      if (prevTimerEnabled == 1) ctx.reply(`👁️ Мониторинг отключён.\nМониторинг будет автоматически восстановлен в случае если вы добавите новые настройки для мониторинга и включите таймер.\n/help для информации.`);
+      if (prevTimerEnabled == 1) await ctx.reply(`👁️ Мониторинг отключён.\nМониторинг будет автоматически восстановлен в случае если вы добавите новые настройки для мониторинга и включите таймер.\n/help для информации.`);
     }
 
   } catch (error) { console.log(`Ошибка:`, error) };
@@ -2457,16 +2532,16 @@ async function advMode(ctx) { //вспомогательная функция д
     if (isNaN(advmode) || advmode < 0 || (advmode > 3)) {
       userSettings = await getUserSettings(userId);
       advmode = userSettings && userSettings.advmode != undefined ? userSettings.advmode : 0;
-      return ctx.reply('Укажите корректное значение параметра:\n0 - отключено\n1 - отображение только дополнительной информации о текущем счете и других игроках\n2 - отображение только дополнительной информации о параметрах сервера\n3 - отображение всей дополнительной информации.\n\nТекущее значение: ' + advmode);
+      return await ctx.reply('Укажите корректное значение параметра:\n0 - отключено\n1 - отображение только дополнительной информации о текущем счете и других игроках\n2 - отображение только дополнительной информации о параметрах сервера\n3 - отображение всей дополнительной информации.\n\nТекущее значение: ' + advmode);
     }
 
     await updateUserSettings(userId, { advmode: advmode });
     userSettings = await getUserSettings(userId);
     advmode = userSettings.advmode;
     if (advmode > 0) {
-      return ctx.reply('📚 Расширенный режим отображения информации: ВКЛЮЧЁН.');
+      return await ctx.reply('📚 Расширенный режим отображения информации: ВКЛЮЧЁН.');
     } else {
-      return ctx.reply('📚 Расширенный режим отображения информации: ВЫКЛЮЧЕН.');
+      return await ctx.reply('📚 Расширенный режим отображения информации: ВЫКЛЮЧЕН.');
     }
 
 
@@ -2501,16 +2576,16 @@ async function advControls(ctx) { //вспомогательная функци�
     if (isNaN(advcontrols) || advcontrols < 0 || (advcontrols > 1)) {
       userSettings = await getUserSettings(userId);
       advcontrols = userSettings && userSettings.advcontrols != undefined ? userSettings.advcontrols : 0;
-      return ctx.reply('Укажите корректное значение параметра:\n0 - отключено\n1 - отображение дополнительных кнопок под окном результата поиска.\n\nТекущее значение: ' + advcontrols);
+      return await ctx.reply('Укажите корректное значение параметра:\n0 - отключено\n1 - отображение дополнительных кнопок под окном результата поиска.\n\nТекущее значение: ' + advcontrols);
     }
 
     await updateUserSettings(userId, { advcontrols: advcontrols });
     userSettings = await getUserSettings(userId);
     advcontrols = userSettings.advcontrols;
     if (advcontrols > 0) {
-      return ctx.reply('🈁 Отображение дополнительных кнопок в окне результатов поиска: ВКЛЮЧЕНО.');
+      return await ctx.reply('🈁 Отображение дополнительных кнопок в окне результатов поиска: ВКЛЮЧЕНО.');
     } else {
-      return ctx.reply('🈁 Отображение дополнительных кнопок в окне результатов поиска: ВЫКЛЮЧЕНО.');
+      return await ctx.reply('🈁 Отображение дополнительных кнопок в окне результатов поиска: ВЫКЛЮЧЕНО.');
     }
 
 
@@ -2546,16 +2621,16 @@ async function autoDelHistory(ctx) { //вспомогательная функц
     if (isNaN(autodelhistory) || autodelhistory < 0 || (autodelhistory > 1)) {
       userSettings = await getUserSettings(userId);
       autodelhistory = userSettings && userSettings.autodelhistory != undefined ? userSettings.autodelhistory : 0;
-      return ctx.reply('Укажите корректное значение параметра:\n0 - отключено\n1 - автоматическое удаление предыдущих сообщений о найденных игроках / серверах.\n\nТекущее значение: ' + autodelhistory);
+      return await ctx.reply('Укажите корректное значение параметра:\n0 - отключено\n1 - автоматическое удаление предыдущих сообщений о найденных игроках / серверах.\n\nТекущее значение: ' + autodelhistory);
     }
 
     await updateUserSettings(userId, { autodelhistory: autodelhistory });
     userSettings = await getUserSettings(userId);
     autodelhistory = userSettings.autodelhistory;
     if (autodelhistory > 0) {
-      return ctx.reply('Автоматическое удаление предыдущих сообщений о найденных игроках / серверах: ВКЛЮЧЕНО.');
+      return await ctx.reply('Автоматическое удаление предыдущих сообщений о найденных игроках / серверах: ВКЛЮЧЕНО.');
     } else {
-      return ctx.reply('Автоматическое удаление предыдущих сообщений о найденных игроках / серверах: ВЫКЛЮЧЕНО.');
+      return await ctx.reply('Автоматическое удаление предыдущих сообщений о найденных игроках / серверах: ВЫКЛЮЧЕНО.');
     }
 
 
@@ -2591,16 +2666,16 @@ async function altViewSetup(ctx) { //вспомогательная функци
     if (isNaN(altview) || altview < 0 || (altview > 1)) {
       userSettings = await getUserSettings(userId);
       altview = userSettings && userSettings.altview != undefined ? userSettings.altview : 0;
-      return ctx.reply('Укажите корректное значение параметра:\n0 - стандартное отображение информации\n1 - альтернативное (компактное).\n\nТекущее значение: ' + altview);
+      return await ctx.reply('Укажите корректное значение параметра:\n0 - стандартное отображение информации\n1 - альтернативное (компактное).\n\nТекущее значение: ' + altview);
     }
 
     await updateUserSettings(userId, { altview: altview });
     userSettings = await getUserSettings(userId);
     altview = userSettings.altview;
     if (altview > 0) {
-      return ctx.reply('Альтернативное (компактное) отображение информации: ВКЛЮЧЕНО.');
+      return await ctx.reply('Альтернативное (компактное) отображение информации: ВКЛЮЧЕНО.');
     } else {
-      return ctx.reply('Альтернативное (компактное) отображение информации: ВЫКЛЮЧЕНО.');
+      return await ctx.reply('Альтернативное (компактное) отображение информации: ВЫКЛЮЧЕНО.');
     }
 
 
@@ -2636,16 +2711,16 @@ async function heuristicMode(ctx) { //вспомогательная функц�
     if (isNaN(heuristic) || heuristic < 0 || (heuristic > 1)) {
       userSettings = await getUserSettings(userId);
       heuristic = userSettings && userSettings.heuristic != undefined ? userSettings.heuristic : 0;
-      return ctx.reply('Укажите корректное значение параметра:\n0 - стандартное\n1 - эвристический анализ (базовая версия).\n\nТекущее значение: ' + heuristic);
+      return await ctx.reply('Укажите корректное значение параметра:\n0 - стандартное\n1 - эвристический анализ (базовая версия).\n\nТекущее значение: ' + heuristic);
     }
 
     await updateUserSettings(userId, { heuristic: heuristic });
     userSettings = await getUserSettings(userId);
     heuristic = userSettings.heuristic;
     if (heuristic > 0) {
-      return ctx.reply('🧊 Эвристический анализ: ВКЛЮЧЕН.');
+      return await ctx.reply('🧊 Эвристический анализ: ВКЛЮЧЕН.');
     } else {
-      return ctx.reply('🧊 Эвристический анализ: ВЫКЛЮЧЕН.');
+      return await ctx.reply('🧊 Эвристический анализ: ВЫКЛЮЧЕН.');
     }
 
 
@@ -2681,7 +2756,7 @@ async function minPlayerScore(ctx) { //вспомогательная функц
     if (isNaN(minPS)) {
       userSettings = await getUserSettings(userId);
       minPS = userSettings && userSettings.minplayerscore != undefined ? userSettings.minplayerscore : 0;
-      return ctx.reply(`Укажите корректное значение параметра:
+      return await ctx.reply(`Укажите корректное значение параметра:
 
 ➡️ 0 : не учитывать минимальное количество очков в поиске игрока.
 ➡️ 1 и больше : учитывать (на указанное число). К примеру, если вы указали 2, то игрок попадёт в мониторинг только в том случае, если счёт его фрагов от 2 и больше.
@@ -2694,9 +2769,9 @@ async function minPlayerScore(ctx) { //вспомогательная функц
     userSettings = await getUserSettings(userId);
     minPS = userSettings.heuristic;
     if (minPS > 0) {
-      return ctx.reply('🕵️ Учёт минимального количества очков в поиске игрока:  ВКЛЮЧЕНО.');
+      return await ctx.reply('🕵️ Учёт минимального количества очков в поиске игрока:  ВКЛЮЧЕНО.');
     } else {
-      return ctx.reply('🕵️ Учёт минимального количества очков в поиске игрока:  ВЫКЛЮЧЕНО.');
+      return await ctx.reply('🕵️ Учёт минимального количества очков в поиске игрока:  ВЫКЛЮЧЕНО.');
     }
 
 
@@ -2732,16 +2807,16 @@ async function minPlayers(ctx) { //функция для установки ми
     if (isNaN(minPlayers) || minPlayers < 0 || (minPlayers > config.SERVER_MIN_PLAYERS)) {
       userSettings = await getUserSettings(userId);
       minPlayers = userSettings && userSettings.minPlayers != undefined ? userSettings.minPlayers : 1;
-      return ctx.reply(`Укажите корректное значение параметра:\n0 - отключено\n1 ... ${config.SERVER_MIN_PLAYERS} включение сервера в поиск только в случае, если на нём присутствует не менее заданного числа игроков.\nИспользуйте команду /botfilter 1 если хотите исключить из анализа ботов типа WallFly\nТекущее значение: ${minPlayers}`);
+      return await ctx.reply(`Укажите корректное значение параметра:\n0 - отключено\n1 ... ${config.SERVER_MIN_PLAYERS} включение сервера в поиск только в случае, если на нём присутствует не менее заданного числа игроков.\nИспользуйте команду /botfilter 1 если хотите исключить из анализа ботов типа WallFly\nТекущее значение: ${minPlayers}`);
     }
 
     await updateUserSettings(userId, { minPlayers: minPlayers });
     userSettings = await getUserSettings(userId);
     minPlayers = userSettings.minPlayers;
     if (minPlayers > 0) {
-      return ctx.reply('Фильтрация серверов по минимальному количеству игроков: ВКЛЮЧЕНА');
+      return await ctx.reply('Фильтрация серверов по минимальному количеству игроков: ВКЛЮЧЕНА');
     } else {
-      return ctx.reply('Фильтрация серверов по минимальному количеству игроков: ВЫКЛЮЧЕНА.');
+      return await ctx.reply('Фильтрация серверов по минимальному количеству игроков: ВЫКЛЮЧЕНА.');
     }
   } catch (error) { console.log(`Ошибка:`, error) };
 }
@@ -2774,16 +2849,16 @@ async function botFilter(ctx) { //функция для установки ре�
     if (isNaN(botFilter) || botFilter < 0 || (botFilter > 1)) {
       userSettings = await getUserSettings(userId);
       botFilter = userSettings && userSettings.botFilter != undefined ? userSettings.botFilter : 1;
-      return ctx.reply('Укажите корректное значение параметра:\n0 - отключено, 1 - включено\nИспользуйте /botfilter 1 если хотите исключить из анализа ботов типа WallFly (влияет только при поиске серверов в паре с командой \minplayers.\nТекущее значение: ' + botFilter);
+      return await ctx.reply('Укажите корректное значение параметра:\n0 - отключено, 1 - включено\nИспользуйте /botfilter 1 если хотите исключить из анализа ботов типа WallFly (влияет только при поиске серверов в паре с командой \minplayers.\nТекущее значение: ' + botFilter);
     }
 
     await updateUserSettings(userId, { botFilter: botFilter });
     userSettings = await getUserSettings(userId);
     botFilter = userSettings.botFilter;
     if (botFilter > 0) {
-      return ctx.reply('Фильтрация ботов: ВКЛЮЧЕНА');
+      return await ctx.reply('Фильтрация ботов: ВКЛЮЧЕНА');
     } else {
-      return ctx.reply('Фильтрация ботов: ВЫКЛЮЧЕНА.');
+      return await ctx.reply('Фильтрация ботов: ВЫКЛЮЧЕНА.');
     }
 
 
@@ -2810,7 +2885,7 @@ bot.command('bf', async (ctx) => {
 bot.command('setbotfilter', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      return await ctx.reply('У вас нет прав для использования этой команды.');
     }
     //console.log("1");
     let botSettings = await getUserSettings(0);
@@ -2821,7 +2896,7 @@ bot.command('setbotfilter', async (ctx) => {
     if (!botFilter || botFilter === undefined || botFilter.lenght == 0 || botFilter.join('') == '') {
       botSettings = await getUserSettings(0);
       botFilter = botSettings && botSettings.botFilter != undefined ? botSettings.botFilter : [];
-      return ctx.reply('Укажите корректное значение параметра.\nТекущее значение: ' + botFilter.join(', '));
+      return await ctx.reply('Укажите корректное значение параметра.\nТекущее значение: ' + botFilter.join(', '));
     }
     console.log('botFilter=' + botFilter.join(', '));
     await updateUserSettings(0, { botFilter: botFilter });
@@ -2829,11 +2904,77 @@ bot.command('setbotfilter', async (ctx) => {
     //console.log('botFilter='+botFilter);
     botSettings = await getUserSettings(0);
     botFilter = botSettings && botSettings.botFilter ? botSettings.botFilter : [];
-    ctx.reply(`Фильтр установлен.\nТекущее значение: ${botFilter.join(', ')}.`);
+    await ctx.reply(`Фильтр установлен.\nТекущее значение: ${botFilter.join(', ')}.`);
   } catch (error) { console.log(`Ошибка:`, error) };
 });
 
-/* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
+/*
+// Команда /silent — включает/выключает тихий режим для текущего чата
+// Доступна только администраторам бота
+bot.command('silent', async (ctx) => {
+  try {
+    const fromId = ctx.from && ctx.from.id;
+    if (!isAdmin(fromId)) {
+      return; // Не админ бота — ничего не делаем
+    }
+
+    const chat = ctx.chat || (ctx.message && ctx.message.chat);
+    if (!chat || !chat.id) {
+      return;
+    }
+
+    const chatId = chat.id;
+    const text = ctx.message && ctx.message.text ? ctx.message.text.trim() : '';
+    const parts = text.split(/\s+/);
+    const arg = parts.length > 1 ? parts[1] : null;
+
+    const botSettings = (await getUserSettings(0)) || {};
+    let silentChats = Array.isArray(botSettings.silentChats)
+      ? botSettings.silentChats
+      : [];
+
+    // Без аргумента — показать текущее значение
+    if (!arg) {
+      const isSilent = silentChats.includes(chatId);
+      return await ctx.reply(
+        `Текущее значение для этого чата: silent = ${isSilent ? 1 : 0}`,
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+
+    if (arg === '1') {
+      if (!silentChats.includes(chatId)) {
+        silentChats.push(chatId);
+        await updateUserSettings(0, { silentChats });
+      }
+      return await ctx.reply(
+        'Тихий режим для этого чата включён (silent = 1).\n' +
+        'Бот будет игнорировать команды в этом чате, кроме /silent.',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else if (arg === '0') {
+      if (silentChats.includes(chatId)) {
+        silentChats = silentChats.filter(id => id !== chatId);
+        await updateUserSettings(0, { silentChats });
+      }
+      return await ctx.reply(
+        'Тихий режим для этого чата выключен (silent = 0).',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } else {
+      return await ctx.reply(
+        'Использование:\n' +
+        '/silent — показать текущее значение для этого чата\n' +
+        '/silent 1 — включить тихий режим\n' +
+        '/silent 0 — выключить тихий режим',
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    }
+  } catch (err) {
+    console.log('Ошибка команды /silent:', err);
+  }
+});
+*/
 
 // Команда /silent — включает/выключает тихий режим для текущего чата
 // Доступна только администраторам бота
@@ -2862,7 +3003,7 @@ bot.command('silent', async (ctx) => {
     // Без аргумента — показать текущее значение
     if (!arg) {
       const isSilent = silentChats.includes(chatId);
-      return ctx.reply(
+      return await ctx.reply(
         `Текущее значение для этого чата: silent = ${isSilent ? 1 : 0}`,
         { reply_to_message_id: ctx.message.message_id }
       );
@@ -2873,7 +3014,7 @@ bot.command('silent', async (ctx) => {
         silentChats.push(chatId);
         await updateUserSettings(0, { silentChats });
       }
-      return ctx.reply(
+      return await ctx.reply(
         'Тихий режим для этого чата включён (silent = 1).\n' +
         'Бот будет игнорировать команды в этом чате, кроме /silent.',
         { reply_to_message_id: ctx.message.message_id }
@@ -2883,12 +3024,12 @@ bot.command('silent', async (ctx) => {
         silentChats = silentChats.filter(id => id !== chatId);
         await updateUserSettings(0, { silentChats });
       }
-      return ctx.reply(
+      return await ctx.reply(
         'Тихий режим для этого чата выключен (silent = 0).',
         { reply_to_message_id: ctx.message.message_id }
       );
     } else {
-      return ctx.reply(
+      return await ctx.reply(
         'Использование:\n' +
         '/silent — показать текущее значение для этого чата\n' +
         '/silent 1 — включить тихий режим\n' +
@@ -2908,12 +3049,12 @@ bot.command('silent', async (ctx) => {
 bot.command('unban', async (ctx) => {
   try {
     if (!await isAdmin(ctx.from.id)) {
-      return ctx.reply('У вас нет прав для использования этой команды.');
+      return await ctx.reply('У вас нет прав для использования этой команды.');
     }
 
     const userId = ctx.message.text.split(' ')[1];
     await unbanUser(userId); // Предполагается, что функция реализована в db.js
-    ctx.reply(`Пользователь с ID ${userId} разблокирован.`);
+    await ctx.reply(`Пользователь с ID ${userId} разблокирован.`);
   } catch (error) { console.log(`Ошибка:`, error) };
 });
 
@@ -2964,18 +3105,18 @@ async function sleepTime(ctx) { //функция для установки вр�
     const curSleepTime = userSettings && userSettings.sleepTime && userSettings.sleepTime !== undefined ? userSettings.sleepTime : 'не установлено';
 
     if (sleepTime == undefined || sleepTime.trim() == '') {
-      return ctx.reply(`Укажите корректно время сна в формате /sp <hh:mm-hh2:mm2>, например: /sp 23:00-09:00, либо /sp 0 для сброса параметра.\nТекущее значение: ${curSleepTime}`);
+      return await ctx.reply(`Укажите корректно время сна в формате /sp <hh:mm-hh2:mm2>, например: /sp 23:00-09:00, либо /sp 0 для сброса параметра.\nТекущее значение: ${curSleepTime}`);
     }
     else if (sleepTime.trim() == '0') {
       await updateUserSettings(userId, { sleepTime: '' });
-      ctx.reply(`Время сна отключено`);
+      await ctx.reply(`Время сна отключено`);
     }
     else if (!isValidTimeRange(sleepTime)) {
-      return ctx.reply(`Укажите корректно время сна в формате /sp <hh:mm-hh2:mm2>, например: /sp 23:00-09:00, либо /sp 0 для сброса параметра\nТекущее значение: ${curSleepTime}`);
+      return await ctx.reply(`Укажите корректно время сна в формате /sp <hh:mm-hh2:mm2>, например: /sp 23:00-09:00, либо /sp 0 для сброса параметра\nТекущее значение: ${curSleepTime}`);
     }
     else {
       await updateUserSettings(userId, { sleepTime });
-      ctx.reply(`Время сна установлено: ${sleepTime}`);
+      await ctx.reply(`Время сна установлено: ${sleepTime}`);
     }
 
 
@@ -4112,8 +4253,10 @@ async function refreshServers(userId, serverToSearch, mapsToSearch, forceAllServ
             }
             else {
               log('refreshServers -> sentMessage: chatId=' + chatId + 'themeId=' + themeId);
-              if (advcontrols) sentMessage = await bot.telegram.sendMessage(chatId, chunk, { message_thread_id: themeId, parse_mode: 'HTML', reply_markup: keyboard });
-              else sentMessage = await bot.telegram.sendMessage(chatId, chunk, { message_thread_id: themeId, parse_mode: 'HTML' });
+              try {
+                if (advcontrols) sentMessage = await bot.telegram.sendMessage(chatId, chunk, { message_thread_id: themeId, parse_mode: 'HTML', reply_markup: keyboard });
+                else sentMessage = await bot.telegram.sendMessage(chatId, chunk, { message_thread_id: themeId, parse_mode: 'HTML' });
+              } catch (error) { console.log(`Ошибка отправки сообщения: ${error.message}`, error); }
             }
 
             if (autodelhistory == 1) messageIds[previousMessageIdIndex] = sentMessage.message_id;
@@ -4642,7 +4785,7 @@ bot.command('rs', async (ctx) => {
     const userSettings = await getUserSettings(userId);
     if (!userSettings || userSettings === undefined || userSettings.q2servers === undefined || userSettings.q2servers.join("").trim() === '') {
       //return await bot.telegram.sendMessage(ctx.chat.id, 'Вначале внесите настройки для поиска (/addserverq2).');
-      return ctx.reply('Вначале внесите настройки для поиска (/addserverq2).');
+      return await ctx.reply('Вначале внесите настройки для поиска (/addserverq2).');
     }
     /* -дописать потом
     let server = "";
@@ -4682,7 +4825,7 @@ bot.command('sp', async (ctx) => {
     }
 
     if (!isValidPlayerName(sp)) {
-      return ctx.reply(`Имя игрока должно состоять из минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов).  + Если используется маска, то минимум ${config.PLAYERS_NICK_NAME_MASK_LIMIT} символа(ов) + одна или две звездочки.`);
+      return await ctx.reply(`Имя игрока должно состоять из минимум ${config.PLAYERS_NICK_NAME_LIMIT} символа(ов).  + Если используется маска, то минимум ${config.PLAYERS_NICK_NAME_MASK_LIMIT} символа(ов) + одна или две звездочки.`);
     }
     //console.log('Старт поиска игроков');
     //const msgId = await ctx.reply('Старт поиска игроков');
@@ -4708,7 +4851,7 @@ async function searchServer(ctx, game, msg) { //Функция для поиск
     const ss = ctx.message.text.split(' ')[1];
 
     if (!isValidServer(ss)) {
-      return ctx.reply(msg);
+      return await ctx.reply(msg);
     }
 
     //await ctx.reply('Старт поиска серверов');
@@ -4758,7 +4901,7 @@ async function searchMap(ctx, game, msg) { //Функция для поиска 
     const sm = ctx.message.text.split(' ');
     sm.shift();
     if (!sm || sm.join().trim() == '') {
-      return ctx.reply(msg);
+      return await ctx.reply(msg);
     }
     let msgId = 0;
     await ctx.reply('Старт поиска карты на серверах...').then((message) => {
@@ -4993,7 +5136,7 @@ async function statsSetup(ctx, game) { //вспомогательная функ
       if (isNaN(statsMonitoring) || statsMonitoring < 0 || (statsMonitoring > 1)) {
         userSettings = await getUserSettings(userId);
         statsMonitoring = userSettings && userSettings.sq2m != undefined ? userSettings.sq2m : 0;
-        return ctx.reply('Укажите корректное значение параметра:\n0 - мониторинг статистики серверов ' + game + ' выключен\n1 - включён.\n\nТекущее значение: ' + statsMonitoring);
+        return await ctx.reply('Укажите корректное значение параметра:\n0 - мониторинг статистики серверов ' + game + ' выключен\n1 - включён.\n\nТекущее значение: ' + statsMonitoring);
       }
       await updateUserSettings(userId, { sq2m: statsMonitoring });
       userSettings = await getUserSettings(userId);
@@ -5004,7 +5147,7 @@ async function statsSetup(ctx, game) { //вспомогательная функ
       if (isNaN(statsMonitoring) || statsMonitoring < 0 || (statsMonitoring > 1)) {
         userSettings = await getUserSettings(userId);
         statsMonitoring = userSettings && userSettings.sqwm != undefined ? userSettings.sqwm : 0;
-        return ctx.reply('Укажите корректное значение параметра:\n0 - мониторинг статистики серверов ' + game + ' выключен\n1 - включён.\n\nТекущее значение: ' + statsMonitoring);
+        return await ctx.reply('Укажите корректное значение параметра:\n0 - мониторинг статистики серверов ' + game + ' выключен\n1 - включён.\n\nТекущее значение: ' + statsMonitoring);
       }
       await updateUserSettings(userId, { sqwm: statsMonitoring });
       userSettings = await getUserSettings(userId);
@@ -5012,9 +5155,9 @@ async function statsSetup(ctx, game) { //вспомогательная функ
     }
 
     if (statsMonitoring > 0) {
-      return ctx.reply('Мониторинг статистики серверов ' + game + ': ВКЛЮЧЕН.');
+      return await ctx.reply('Мониторинг статистики серверов ' + game + ': ВКЛЮЧЕН.');
     } else {
-      return ctx.reply('Мониторинг статистики серверов ' + game + ': ВЫКЛЮЧЕН.');
+      return await ctx.reply('Мониторинг статистики серверов ' + game + ': ВЫКЛЮЧЕН.');
     }
 
 
@@ -5778,6 +5921,14 @@ async function deleteBotMessagesInTopic(chatId, messageThreadId) {
   }
 }
 
+bot.on('error', (error) => {
+  try {
+    console.error('Global error caught: ', error);
+  } catch (error) {
+    //log('Ошибка при удалении сообщений бота в теме:', error);
+  }
+  // Можете добавить логику для восстановления, например, перезапуск действия
+});
 
 /* --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
